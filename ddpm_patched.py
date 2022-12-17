@@ -189,6 +189,8 @@ class UNetPatched(nn.Module):
         t = t.unsqueeze(-1).type(torch.float)
         t = self.pos_encoding(t, self.time_dim)
 
+        B, _, _, _ = x.shape
+
         x0 = extract_tensor_patches(
             x, 
             window_size=self.ep_window_size, 
@@ -200,8 +202,8 @@ class UNetPatched(nn.Module):
         # reshape tensor so that its shape becomes
         #   B, C * P*P, H, W
         x0 = x0.reshape((
-            -1, 
-            self.c_in,
+            B, # -1,
+            -1, # self.c_in,
             self.height // self.num_patches, 
             self.width // self.num_patches
         ))
@@ -232,8 +234,8 @@ class UNetPatched(nn.Module):
         #   B, P*P, C, H, W
         # which can be combined with Kornia's combine_tensor_patches function
         x = x.reshape((
-            -1, 
-            self.c_out // self.channels,
+            B, # -1, 
+            -1, # self.c_out // self.channels,
             self.channels,
             self.height // self.num_patches, 
             self.width // self.num_patches
