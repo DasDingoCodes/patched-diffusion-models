@@ -107,13 +107,13 @@ def launch():
     import argparse
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
-    args.run_name = "DDPM_Patched_celeba_100_epochs"
+    args.run_name = "DDPM_Patched_animefaces_100_epochs"
     args.epochs = 100
     args.steps_per_epoch = 1000
     args.batch_size = 32
     args.image_size = 64
-    args.num_patches = 4
-    args.dataset_path = r"data\celeba"
+    args.num_patches = 2
+    args.dataset_path = r"data\animefaces"
     args.device = "cuda"
     args.lr = 3e-4
     args.hidden = 64
