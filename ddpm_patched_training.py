@@ -6,6 +6,7 @@ from tqdm import tqdm
 from torch import optim
 from ddpm_utils import *
 from ddpm_patched import UNetPatched
+from ddpm_modules import UNet
 import logging
 from torch.utils.tensorboard import SummaryWriter
 
@@ -63,10 +64,13 @@ def train(args):
     setup_logging(args.run_name)
     device = args.device
     dataloader = get_data(args)
-    model = UNetPatched(
-        img_shape=(3, args.image_size, args.image_size),
+    #model = UNetPatched(
+    #    img_shape=(3, args.image_size, args.image_size),
+    #    hidden=args.hidden,
+    #    num_patches=args.num_patches
+    #).to(device)
+    model = UNet(
         hidden=args.hidden,
-        num_patches=args.num_patches
     ).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
@@ -107,7 +111,7 @@ def launch():
     import argparse
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
-    args.run_name = "DDPM_Patched_animefaces_100_epochs"
+    args.run_name = "DDPM_Unpatched_animefaces_100_epochs"
     args.epochs = 100
     args.steps_per_epoch = 1000
     args.batch_size = 32
