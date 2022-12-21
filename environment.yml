@@ -1,5 +1,7 @@
 name: my_pytorch
 channels:
+  - pytorch
+  - nvidia
   - defaults
 dependencies:
   - python==3.8
