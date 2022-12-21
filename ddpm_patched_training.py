@@ -116,7 +116,7 @@ def launch():
     args.steps_per_epoch = 1000
     args.batch_size = 32
     args.image_size = 64
-    args.num_patches = 2
+    args.num_patches = 4
     args.dataset_path = "data/animefaces"
     args.device = "cuda"
     args.lr = 3e-4
