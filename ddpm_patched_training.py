@@ -111,7 +111,7 @@ def launch():
     import argparse
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
-    args.run_name = "DDPM_2x2_patches_animefaces_100_epochs"
+    args.run_name = "DDPM_4x4_patches_animefaces_100_epochs"
     args.epochs = 100
     args.steps_per_epoch = 1000
     args.batch_size = 32
