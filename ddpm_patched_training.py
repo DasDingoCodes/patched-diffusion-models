@@ -69,9 +69,9 @@ def train(args):
         hidden=args.hidden,
         num_patches=args.num_patches
     ).to(device)
-    # model = UNet(
-    #     hidden=args.hidden,
-    # ).to(device)
+    #model = UNet(
+    #    hidden=args.hidden,
+    #).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
     diffusion = Diffusion(img_size=args.image_size, device=device)
