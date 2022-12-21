@@ -2,6 +2,7 @@ import os
 import torch
 import torchvision
 from PIL import Image
+from pathlib import Path
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader
 
@@ -28,7 +29,7 @@ def get_data(args):
         torchvision.transforms.ToTensor(),
         torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
-    dataset = torchvision.datasets.ImageFolder(args.dataset_path, transform=transforms)
+    dataset = torchvision.datasets.ImageFolder(Path(args.dataset_path), transform=transforms)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
     return dataloader
 
