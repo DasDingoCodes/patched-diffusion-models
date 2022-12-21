@@ -64,14 +64,14 @@ def train(args):
     setup_logging(args.run_name)
     device = args.device
     dataloader = get_data(args)
-    #model = UNetPatched(
-    #    img_shape=(3, args.image_size, args.image_size),
-    #    hidden=args.hidden,
-    #    num_patches=args.num_patches
-    #).to(device)
-    model = UNet(
+    model = UNetPatched(
+        img_shape=(3, args.image_size, args.image_size),
         hidden=args.hidden,
+        num_patches=args.num_patches
     ).to(device)
+    #model = UNet(
+    #    hidden=args.hidden,
+    #).to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
     diffusion = Diffusion(img_size=args.image_size, device=device)
@@ -111,7 +111,7 @@ def launch():
     import argparse
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
-    args.run_name = "DDPM_Unpatched_animefaces_100_epochs"
+    args.run_name = "DDPM_2x2_patches_animefaces_100_epochs"
     args.epochs = 100
     args.steps_per_epoch = 1000
     args.batch_size = 32
