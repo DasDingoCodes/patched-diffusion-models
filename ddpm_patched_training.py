@@ -117,7 +117,7 @@ def launch():
     args.batch_size = 32
     args.image_size = 64
     args.num_patches = 2
-    args.dataset_path = r"data\animefaces"
+    args.dataset_path = "data/animefaces"
     args.device = "cuda"
     args.lr = 3e-4
     args.hidden = 64
