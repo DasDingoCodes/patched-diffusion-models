@@ -175,7 +175,11 @@ class UNetPatched(nn.Module):
         self.up3 = Up(hidden*2, hidden)
         self.sa6 = SelfAttention(hidden, self.img_size // self.num_patches // 1)
         self.c_out = self.c_in
-        self.outc = nn.Conv2d(hidden, self.c_out, kernel_size=1)
+        self.outc = nn.Sequential(
+            DoubleConv(hidden, hidden),
+            DoubleConv(hidden, hidden),
+            DoubleConv(hidden, self.c_out, hidden),
+        )
 
     def pos_encoding(self, t, channels):
         inv_freq = 1.0 / (
