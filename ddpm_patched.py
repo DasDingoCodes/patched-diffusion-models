@@ -2,7 +2,6 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from kornia.contrib import extract_tensor_patches, combine_tensor_patches
 
 
 class EMA:
@@ -145,10 +144,6 @@ class UNetPatched(nn.Module):
         assert self.height % num_patches == 0, "height of input images needs to be divisible by number of patches"
         assert self.width % num_patches == 0, "width of input images needs to be divisible by number of patches"
 
-        # window size when extracting patches (before conv layers)
-        self.ep_window_size = (self.height // num_patches, self.width // num_patches)
-        self.ep_stride = self.ep_window_size
-
         # window size when combining patches (after conv layers)
         self.cp_window_size = (num_patches, num_patches)
         self.cp_stride = self.cp_window_size
@@ -185,28 +180,27 @@ class UNetPatched(nn.Module):
         pos_enc = torch.cat([pos_enc_a, pos_enc_b], dim=-1)
         return pos_enc
 
+    def to_patches(self, x, patch_size=2):
+        """Splits tensor x into patches_size*patches_size patches"""
+        p = patch_size
+        B, C, H, W = x.shape
+        x = x.permute(0, 2, 3, 1).reshape(B, H, W//p, C*p)
+        x = x.permute(0, 2, 1, 3).reshape(B, W//p, H//p, C*p*p)
+        return x.permute(0, 3, 2, 1)
+
+    def from_patches(self, x, patch_size=2):
+        """Combines x's patches_size*patches_size patches into one"""
+        p = patch_size
+        B, C, H, W = x.shape
+        x = x.permute(0,3,2,1).reshape(B, W, H*p, C//p)
+        x = x.permute(0,2,1,3).reshape(B, H*p, W*p, C//(p*p))
+        return x.permute(0, 3, 1, 2)
+
     def forward(self, x, t):
         t = t.unsqueeze(-1).type(torch.float)
         t = self.pos_encoding(t, self.time_dim)
 
-        B, _, _, _ = x.shape
-
-        x0 = extract_tensor_patches(
-            x, 
-            window_size=self.ep_window_size, 
-            stride=self.ep_stride
-        )
-        # after Kornia's extract_tensor_patches function, shape will be 
-        #   B, P*P, C, H, W
-        # (B = batch size, P = number of patches, C = input image channels, H = height, W = width)
-        # reshape tensor so that its shape becomes
-        #   B, C * P*P, H, W
-        x0 = x0.reshape((
-            B, # -1,
-            -1, # self.c_in,
-            self.height // self.num_patches, 
-            self.width // self.num_patches
-        ))
+        x0 = self.to_patches(x, patch_size=self.num_patches)
         x1 = self.inc(x0)
         x2 = self.down1(x1, t)
         #x2 = self.sa1(x2)
@@ -227,23 +221,5 @@ class UNetPatched(nn.Module):
         #x = self.sa6(x)
         x = self.outc(x)
         
-        # after UNet, shape should be 
-        #   B, C * P*P, H, W
-        # (B = batch size, P = number of patches, C = input image channels, H = height, W = width)
-        # reshape tensor so that its shape becomes
-        #   B, P*P, C, H, W
-        # which can be combined with Kornia's combine_tensor_patches function
-        x = x.reshape((
-            B, # -1, 
-            -1, # self.c_out // self.channels,
-            self.channels,
-            self.height // self.num_patches, 
-            self.width // self.num_patches
-        ))
-        output = combine_tensor_patches(
-            x, 
-            window_size=self.num_patches,
-            stride=self.num_patches,
-            original_size=(self.height, self.width)
-        )
+        output = self.from_patches(x, patch_size=self.num_patches)
         return output
