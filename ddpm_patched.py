@@ -143,6 +143,8 @@ class UNetPatched(nn.Module):
         self.channels, self.height, self.width = img_shape
         assert self.height % num_patches == 0, "height of input images needs to be divisible by number of patches"
         assert self.width % num_patches == 0, "width of input images needs to be divisible by number of patches"
+        assert self.height == self.width, "only allow square images for now"
+        self.img_size = self.height
 
         # window size when combining patches (after conv layers)
         self.cp_window_size = (num_patches, num_patches)
@@ -153,20 +155,25 @@ class UNetPatched(nn.Module):
         self.c_in = self.channels * num_patches * num_patches
         self.inc = DoubleConv(self.c_in, hidden)
         self.down1 = Down(hidden, hidden*2)
-        #self.sa1 = SelfAttention(hidden*2, 32)
+        # self attention outputs shape (B, C, S, S) with C channels and S size
+        # channels is the same as the layer before self attention outputs
+        # i.e. what is given as the second parameter of Down instance (hidden*2 in this case)
+        # size is also the same as the previous layer outputs but we first have to calculate the size
+        # it is the input image size / num_patches / 2^x with x being the "level" the layer is at within the UNet
+        self.sa1 = SelfAttention(hidden*2, self.img_size // self.num_patches // 2)
         self.down2 = Down(hidden*2, hidden*4)
-        #self.sa2 = SelfAttention(hidden*4, 16)
+        self.sa2 = SelfAttention(hidden*4, self.img_size // self.num_patches // 4)
         self.down3 = Down(hidden*4, hidden*4)
-        #self.sa3 = SelfAttention(hidden*4, 8)
+        self.sa3 = SelfAttention(hidden*4, self.img_size // self.num_patches // 8)
         self.bot1 = DoubleConv(hidden*4, hidden*8)
         self.bot2 = DoubleConv(hidden*8, hidden*8)
         self.bot3 = DoubleConv(hidden*8, hidden*4)
         self.up1 = Up(hidden*8, hidden*2)
-        #self.sa4 = SelfAttention(hidden*2, 16)
+        self.sa4 = SelfAttention(hidden*2, self.img_size // self.num_patches // 4)
         self.up2 = Up(hidden*4, hidden)
-        #self.sa5 = SelfAttention(hidden, 32)
+        self.sa5 = SelfAttention(hidden, self.img_size // self.num_patches // 2)
         self.up3 = Up(hidden*2, hidden)
-        #self.sa6 = SelfAttention(hidden, 64)
+        self.sa6 = SelfAttention(hidden, self.img_size // self.num_patches // 1)
         self.c_out = self.c_in
         self.outc = nn.Conv2d(hidden, self.c_out, kernel_size=1)
 
@@ -203,22 +210,22 @@ class UNetPatched(nn.Module):
         x0 = self.to_patches(x, patch_size=self.num_patches)
         x1 = self.inc(x0)
         x2 = self.down1(x1, t)
-        #x2 = self.sa1(x2)
+        x2 = self.sa1(x2)
         x3 = self.down2(x2, t)
-        #x3 = self.sa2(x3)
+        x3 = self.sa2(x3)
         x4 = self.down3(x3, t)
-        #x4 = self.sa3(x4)
+        x4 = self.sa3(x4)
 
         x4 = self.bot1(x4)
         x4 = self.bot2(x4)
         x4 = self.bot3(x4)
 
         x = self.up1(x4, x3, t)
-        #x = self.sa4(x)
+        x = self.sa4(x)
         x = self.up2(x, x2, t)
-        #x = self.sa5(x)
+        x = self.sa5(x)
         x = self.up3(x, x1, t)
-        #x = self.sa6(x)
+        x = self.sa6(x)
         x = self.outc(x)
         
         output = self.from_patches(x, patch_size=self.num_patches)
