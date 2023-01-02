@@ -111,18 +111,19 @@ def train(args):
 def launch():
     import argparse
     parser = argparse.ArgumentParser()
+    dataset = "animefaces"
     args = parser.parse_args()
     args.epochs = 100
     args.steps_per_epoch = 1000
     args.batch_size = 32
     args.image_size = 64
     args.num_patches = 2
-    args.dataset_path = "data/animefaces"
+    args.dataset_path = f"data/{dataset}"
     args.device = "cuda"
     args.lr = 3e-4
     args.hidden = 64
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
-    args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_animefaces_100_epochs"
+    args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)
 
 
