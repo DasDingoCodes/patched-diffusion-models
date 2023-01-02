@@ -9,6 +9,7 @@ from ddpm_patched import UNetPatched
 from ddpm_modules import UNet
 import logging
 from torch.utils.tensorboard import SummaryWriter
+from datetime import datetime
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S")
 
@@ -111,7 +112,8 @@ def launch():
     import argparse
     parser = argparse.ArgumentParser()
     args = parser.parse_args()
-    args.run_name = "DDPM_4x4_patches_animefaces_100_epochs"
+    time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+    args.run_name = f"{time_str}_DDPM_4x4_patches_animefaces_100_epochs"
     args.epochs = 100
     args.steps_per_epoch = 1000
     args.batch_size = 32
