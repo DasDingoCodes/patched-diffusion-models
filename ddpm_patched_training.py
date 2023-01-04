@@ -121,7 +121,7 @@ def launch():
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda"
     args.lr = 3e-4
-    args.hidden = 256
+    args.hidden = 128
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)
