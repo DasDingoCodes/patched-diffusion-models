@@ -176,8 +176,6 @@ class UNetPatched(nn.Module):
         self.sa6 = SelfAttention(hidden, self.img_size // self.num_patches // 1)
         self.c_out = self.c_in
         self.outc = nn.Sequential(
-            DoubleConv(hidden, hidden),
-            DoubleConv(hidden, hidden),
             DoubleConv(hidden, self.c_out, hidden),
         )
 
