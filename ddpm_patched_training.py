@@ -69,10 +69,9 @@ def train(args):
         img_shape=(3, args.image_size, args.image_size),
         hidden=args.hidden,
         num_patches=args.num_patches
-    ).to(device)
-    #model = UNet(
-    #    hidden=args.hidden,
-    #).to(device)
+    )
+    model= nn.DataParallel(model,device_ids = [2, 3])
+    model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
     diffusion = Diffusion(img_size=args.image_size, device=device)
@@ -119,7 +118,7 @@ def launch():
     args.image_size = 128
     args.num_patches = 4
     args.dataset_path = f"data/{dataset}"
-    args.device = "cuda"
+    args.device = "cuda:2,3"
     args.lr = 3e-4
     args.hidden = 128
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
