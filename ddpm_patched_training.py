@@ -68,7 +68,8 @@ def train(args):
     model = UNetPatched(
         img_shape=(3, args.image_size, args.image_size),
         hidden=args.hidden,
-        num_patches=args.num_patches
+        num_patches=args.num_patches,
+        level_mult = args.level_mult
     )
     model= nn.DataParallel(model,device_ids = [2, 3])
     model.to(device)
@@ -117,10 +118,11 @@ def launch():
     args.batch_size = 32
     args.image_size = 128
     args.num_patches = 4
+    args.level_mult = [1,2,4,8]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2,3"
     args.lr = 3e-4
-    args.hidden = 128
+    args.hidden = 256
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)

@@ -131,13 +131,18 @@ class UNetPatched(nn.Module):
         img_shape=(3, 256, 256),
         time_dim=256, 
         hidden=64, 
+        level_mult = [1,2,4,8],
+        num_middle_layers = 3,
         num_patches=4,
         device="cuda"
     ):
         super().__init__()
         self.device = device
         self.time_dim = time_dim
+        self.level_mult = level_mult
         self.num_patches = num_patches
+
+        self.num_levels = len(self.level_mult) - 1
 
         
         self.channels, self.height, self.width = img_shape
@@ -153,32 +158,60 @@ class UNetPatched(nn.Module):
         # after patch extraction and reshaping the dimension of the first Convs input channel will be:
         # channels * num_patches * num_patches
         self.c_in = self.channels * num_patches * num_patches
-        self.inc = DoubleConv(self.c_in, hidden)
-        self.down1 = Down(hidden, hidden*2)
-        # self attention outputs shape (B, C, S, S) with C channels and S size
-        # channels is the same as the layer before self attention outputs
-        # i.e. what is given as the second parameter of Down instance (hidden*2 in this case)
-        # size is also the same as the previous layer outputs but we first have to calculate the size
-        # it is the input image size / num_patches / 2^x with x being the "level" the layer is at within the UNet
-        self.sa1 = SelfAttention(hidden*2, self.img_size // self.num_patches // 2)
-        self.down2 = Down(hidden*2, hidden*4)
-        self.sa2 = SelfAttention(hidden*4, self.img_size // self.num_patches // 4)
-        self.down3 = Down(hidden*4, hidden*4)
-        self.sa3 = SelfAttention(hidden*4, self.img_size // self.num_patches // 8)
-        self.bot1 = DoubleConv(hidden*4, hidden*8)
-        self.bot2 = DoubleConv(hidden*8, hidden*8)
-        self.bot3 = DoubleConv(hidden*8, hidden*4)
-        self.up1 = Up(hidden*8, hidden*2)
-        self.sa4 = SelfAttention(hidden*2, self.img_size // self.num_patches // 4)
-        self.up2 = Up(hidden*4, hidden)
-        self.sa5 = SelfAttention(hidden, self.img_size // self.num_patches // 2)
-        self.up3 = Up(hidden*2, hidden)
-        self.sa6 = SelfAttention(hidden, self.img_size // self.num_patches // 1)
         self.c_out = self.c_in
-        self.outc = nn.Sequential(
-            DoubleConv(hidden, self.c_out, hidden),
-        )
 
+        self.in_layer = DoubleConv(self.c_in, hidden)
+
+        level = 0
+        self.down_conv_layers = []
+        self.down_att_layers = []
+        for i in range(self.num_levels):
+            level += 1
+            hidden_in = hidden * level_mult[i]
+            hidden_out= hidden * level_mult[i+1]
+            self.down_conv_layers.append(
+                Down(hidden_in, hidden_out)
+            )
+            # self attention outputs shape (B, C, S, S) with C channels and S size
+            # channels is the same as the layer before self attention outputs
+            # i.e. what is given as the second parameter of Down instance (hidden*2 in this case)
+            # size is also the same as the previous layer outputs but we first have to calculate the size
+            # it is the input image size / num_patches / 2^x with x being the "level" the layer is at within the UNet
+            self.down_att_layers.append(
+                SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level)
+            )
+        self.down_conv_layers = nn.ModuleList(self.down_conv_layers)
+        self.down_att_layers = nn.ModuleList(self.down_att_layers)
+        
+        self.middle_layers = []
+        hidden_middle = hidden * level_mult[-1]
+        # for _ in range(num_middle_layers):
+        #     self.middle_layers.append(DoubleConv(hidden_middle, hidden_middle))
+        for _ in range(num_middle_layers -1):
+            self.middle_layers.append(DoubleConv(hidden_middle, hidden_middle))
+        # channel count of last middle layer has to fit the channel count of the skip connection with the lowest level
+        # i.e. hidden * factor of second last level
+        self.middle_layers.append(DoubleConv(hidden_middle, hidden * level_mult[-2]))
+        self.middle_layers = nn.ModuleList(self.middle_layers)
+        
+        reversed_level_mult = list(reversed(level_mult))
+        self.up_conv_layers = []
+        self.up_att_layers = []
+        for i in range(self.num_levels):
+            level -= 1
+            hidden_in = hidden * reversed_level_mult[i]
+            hidden_out= hidden * reversed_level_mult[i+1] // 2
+            self.up_conv_layers.append(
+                Up(hidden_in, hidden_out)
+            )
+            self.up_att_layers.append(
+                SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level)
+            )
+        self.up_conv_layers = nn.ModuleList(self.up_conv_layers)
+        self.up_att_layers = nn.ModuleList(self.up_att_layers)
+
+        self.out_layer = DoubleConv(hidden//2, self.c_out, hidden)
+            
     def pos_encoding(self, t, channels):
         inv_freq = 1.0 / (
             10000
@@ -209,26 +242,29 @@ class UNetPatched(nn.Module):
         t = t.unsqueeze(-1).type(torch.float)
         t = self.pos_encoding(t, self.time_dim)
 
-        x0 = self.to_patches(x, patch_size=self.num_patches)
-        x1 = self.inc(x0)
-        x2 = self.down1(x1, t)
-        x2 = self.sa1(x2)
-        x3 = self.down2(x2, t)
-        x3 = self.sa2(x3)
-        x4 = self.down3(x3, t)
-        x4 = self.sa3(x4)
+        x = self.to_patches(x, patch_size=self.num_patches)
+        x = self.in_layer(x)
 
-        x4 = self.bot1(x4)
-        x4 = self.bot2(x4)
-        x4 = self.bot3(x4)
+        # Down
+        x_down_list = []
+        for i in range(self.num_levels):
+            x_down_list.append(x)
+            conv = self.down_conv_layers[i]
+            att = self.down_att_layers[i]
+            x = conv(x, t)
+            x = att(x)
 
-        x = self.up1(x4, x3, t)
-        x = self.sa4(x)
-        x = self.up2(x, x2, t)
-        x = self.sa5(x)
-        x = self.up3(x, x1, t)
-        x = self.sa6(x)
-        x = self.outc(x)
-        
+        for middle_layer in self.middle_layers:
+            x = middle_layer(x)
+
+        for i in range(self.num_levels):
+            conv = self.up_conv_layers[i]
+            att = self.up_att_layers[i]
+            x_skip = x_down_list[ self.num_levels-1 - i ]
+            x = conv(x, x_skip, t)
+            x = att(x)
+
+        x = self.out_layer(x)
+
         output = self.from_patches(x, patch_size=self.num_patches)
         return output
