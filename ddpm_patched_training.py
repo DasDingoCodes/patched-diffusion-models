@@ -71,7 +71,7 @@ def train(args):
         num_patches=args.num_patches,
         level_mult = args.level_mult
     )
-    model= nn.DataParallel(model,device_ids = [2, 3])
+    model= nn.DataParallel(model,device_ids = args.device_ids)
     model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
@@ -120,7 +120,8 @@ def launch():
     args.num_patches = 4
     args.level_mult = [1,2,4,8]
     args.dataset_path = f"data/{dataset}"
-    args.device = "cuda:2,3"
+    args.device = "cuda:2"
+    args.device_ids = [2,3]
     args.lr = 3e-4
     args.hidden = 256
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
