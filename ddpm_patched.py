@@ -160,7 +160,7 @@ class UNetPatched(nn.Module):
         self.c_in = self.channels * num_patches * num_patches
         self.c_out = self.c_in
 
-        self.in_layer = DoubleConv(self.c_in, hidden)
+        self.in_layer = DoubleConv(self.c_in, hidden * level_mult[0])
 
         level = 0
         self.down_conv_layers = []
@@ -187,11 +187,11 @@ class UNetPatched(nn.Module):
         hidden_middle = hidden * level_mult[-1]
         # for _ in range(num_middle_layers):
         #     self.middle_layers.append(DoubleConv(hidden_middle, hidden_middle))
-        for _ in range(num_middle_layers -1):
+        for _ in range(num_middle_layers):
             self.middle_layers.append(DoubleConv(hidden_middle, hidden_middle))
-        # channel count of last middle layer has to fit the channel count of the skip connection with the lowest level
-        # i.e. hidden * factor of second last level
-        self.middle_layers.append(DoubleConv(hidden_middle, hidden * level_mult[-2]))
+        # # channel count of last middle layer has to fit the channel count of the skip connection with the lowest level
+        # # i.e. hidden * factor of second last level
+        # self.middle_layers.append(DoubleConv(hidden_middle, hidden * level_mult[-2]))
         self.middle_layers = nn.ModuleList(self.middle_layers)
         
         reversed_level_mult = list(reversed(level_mult))
@@ -199,8 +199,12 @@ class UNetPatched(nn.Module):
         self.up_att_layers = []
         for i in range(self.num_levels):
             level -= 1
-            hidden_in = hidden * reversed_level_mult[i]
-            hidden_out= hidden * reversed_level_mult[i+1] // 2
+            # hidden in takes in the output of the previous layer 
+            # (for the first UP it's the last middle layer, for the other UP layers its the respective previous UP)
+            # and hidden in takes in some skip connection
+            # (UP on level n takes in the same x as the DOWN on level n)
+            hidden_in = hidden * reversed_level_mult[i] + hidden * reversed_level_mult[i+1]
+            hidden_out= hidden * reversed_level_mult[i+1]
             self.up_conv_layers.append(
                 Up(hidden_in, hidden_out)
             )
@@ -210,7 +214,7 @@ class UNetPatched(nn.Module):
         self.up_conv_layers = nn.ModuleList(self.up_conv_layers)
         self.up_att_layers = nn.ModuleList(self.up_att_layers)
 
-        self.out_layer = DoubleConv(hidden//2, self.c_out, hidden)
+        self.out_layer = DoubleConv(hidden * level_mult[0], self.c_out, hidden)
             
     def pos_encoding(self, t, channels):
         inv_freq = 1.0 / (
