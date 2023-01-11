@@ -119,7 +119,7 @@ def launch():
     args = parser.parse_args()
     args.epochs = 1000
     args.steps_per_epoch = 1000
-    args.batch_size = 32
+    args.batch_size = 8
     args.image_size = 128
     args.num_patches = 4
     args.level_mult = [1,2,4,8]
