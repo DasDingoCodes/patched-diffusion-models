@@ -63,7 +63,10 @@ class Diffusion:
 
 def train(args):
     setup_logging(args.run_name)
-    device = args.device
+    if torch.cuda.device_count() > 1:
+        device = args.device
+    else:
+        device = "cuda"
     dataloader = get_data(args)
     model = UNetPatched(
         img_shape=(3, args.image_size, args.image_size),
@@ -71,7 +74,8 @@ def train(args):
         num_patches=args.num_patches,
         level_mult = args.level_mult
     )
-    model= nn.DataParallel(model,device_ids = args.device_ids)
+    if torch.cuda.device_count() > 1:
+        model= nn.DataParallel(model,device_ids = args.device_ids)
     model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
@@ -82,7 +86,7 @@ def train(args):
     # 8x8 grid of sample images with fixed random values
     # when saving images, 8 columns are default for grid
     num_sample_imgs = 8*8
-    noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(args.device)
+    noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(device)
 
     for epoch in range(args.epochs):
         logging.info(f"Starting epoch {epoch}:")
