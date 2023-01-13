@@ -134,6 +134,7 @@ class UNetPatched(nn.Module):
         level_mult = [1,2,4,8],
         num_middle_layers = 3,
         num_patches=4,
+        use_self_attention=True,
         device="cuda"
     ):
         super().__init__()
@@ -141,6 +142,7 @@ class UNetPatched(nn.Module):
         self.time_dim = time_dim
         self.level_mult = level_mult
         self.num_patches = num_patches
+        self.use_self_attention = use_self_attention
 
         self.num_levels = len(self.level_mult) - 1
 
@@ -177,9 +179,10 @@ class UNetPatched(nn.Module):
             # i.e. what is given as the second parameter of Down instance (hidden*2 in this case)
             # size is also the same as the previous layer outputs but we first have to calculate the size
             # it is the input image size / num_patches / 2^x with x being the "level" the layer is at within the UNet
-            self.down_att_layers.append(
-                SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level)
-            )
+            if self.use_self_attention:
+                self.down_att_layers.append(
+                    SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level)
+                )
         self.down_conv_layers = nn.ModuleList(self.down_conv_layers)
         self.down_att_layers = nn.ModuleList(self.down_att_layers)
         
@@ -208,9 +211,10 @@ class UNetPatched(nn.Module):
             self.up_conv_layers.append(
                 Up(hidden_in, hidden_out)
             )
-            self.up_att_layers.append(
-                SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level)
-            )
+            if self.use_self_attention:
+                self.up_att_layers.append(
+                    SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level)
+                )
         self.up_conv_layers = nn.ModuleList(self.up_conv_layers)
         self.up_att_layers = nn.ModuleList(self.up_att_layers)
 
@@ -254,19 +258,21 @@ class UNetPatched(nn.Module):
         for i in range(self.num_levels):
             x_down_list.append(x)
             conv = self.down_conv_layers[i]
-            att = self.down_att_layers[i]
             x = conv(x, t)
-            x = att(x)
+            if self.use_self_attention:
+                att = self.down_att_layers[i]
+                x = att(x)
 
         for middle_layer in self.middle_layers:
             x = middle_layer(x)
 
         for i in range(self.num_levels):
             conv = self.up_conv_layers[i]
-            att = self.up_att_layers[i]
             x_skip = x_down_list[ self.num_levels-1 - i ]
             x = conv(x, x_skip, t)
-            x = att(x)
+            if self.use_self_attention:
+                att = self.up_att_layers[i]
+                x = att(x)
 
         x = self.out_layer(x)
 
