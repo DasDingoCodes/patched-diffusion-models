@@ -33,7 +33,7 @@ class EMA:
 
 
 class SelfAttention(nn.Module):
-    def __init__(self, channels, size):
+    def __init__(self, channels, size, dropout=0.0):
         super(SelfAttention, self).__init__()
         self.channels = channels
         self.size = size
@@ -42,8 +42,10 @@ class SelfAttention(nn.Module):
         self.ff_self = nn.Sequential(
             nn.LayerNorm([channels]),
             nn.Linear(channels, channels),
+            nn.Dropout(p=dropout),
             nn.GELU(),
             nn.Linear(channels, channels),
+            nn.Dropout(p=dropout),
         )
 
     def forward(self, x):
@@ -56,16 +58,18 @@ class SelfAttention(nn.Module):
 
 
 class DoubleConv(nn.Module):
-    def __init__(self, in_channels, out_channels, mid_channels=None, residual=False):
+    def __init__(self, in_channels, out_channels, mid_channels=None, residual=False, dropout=0.0):
         super().__init__()
         self.residual = residual
         if not mid_channels:
             mid_channels = out_channels
         self.double_conv = nn.Sequential(
             nn.Conv2d(in_channels, mid_channels, kernel_size=3, padding=1, bias=False),
+            nn.Dropout(p=dropout),
             nn.GroupNorm(1, mid_channels),
             nn.GELU(),
             nn.Conv2d(mid_channels, out_channels, kernel_size=3, padding=1, bias=False),
+            nn.Dropout(p=dropout),
             nn.GroupNorm(1, out_channels),
         )
 
@@ -77,12 +81,12 @@ class DoubleConv(nn.Module):
 
 
 class Down(nn.Module):
-    def __init__(self, in_channels, out_channels, emb_dim=256):
+    def __init__(self, in_channels, out_channels, emb_dim=256, dropout=0.0):
         super().__init__()
         self.maxpool_conv = nn.Sequential(
             nn.MaxPool2d(2),
-            DoubleConv(in_channels, in_channels, residual=True),
-            DoubleConv(in_channels, out_channels),
+            DoubleConv(in_channels, in_channels, residual=True, dropout=dropout),
+            DoubleConv(in_channels, out_channels, dropout=dropout),
         )
 
         self.emb_layer = nn.Sequential(
@@ -100,13 +104,13 @@ class Down(nn.Module):
 
 
 class Up(nn.Module):
-    def __init__(self, in_channels, out_channels, emb_dim=256):
+    def __init__(self, in_channels, out_channels, emb_dim=256, dropout=0.0):
         super().__init__()
 
         self.up = nn.Upsample(scale_factor=2, mode="bilinear", align_corners=True)
         self.conv = nn.Sequential(
-            DoubleConv(in_channels, in_channels, residual=True),
-            DoubleConv(in_channels, out_channels, in_channels // 2),
+            DoubleConv(in_channels, in_channels, residual=True, dropout=dropout),
+            DoubleConv(in_channels, out_channels, in_channels // 2, dropout=dropout),
         )
 
         self.emb_layer = nn.Sequential(
@@ -135,7 +139,8 @@ class UNetPatched(nn.Module):
         num_middle_layers = 3,
         num_patches=4,
         use_self_attention=True,
-        device="cuda"
+        device="cuda",
+        dropout=0.0
     ):
         super().__init__()
         self.device = device
@@ -143,6 +148,7 @@ class UNetPatched(nn.Module):
         self.level_mult = level_mult
         self.num_patches = num_patches
         self.use_self_attention = use_self_attention
+        self.dropout = dropout
 
         self.num_levels = len(self.level_mult) - 1
 
@@ -162,7 +168,7 @@ class UNetPatched(nn.Module):
         self.c_in = self.channels * num_patches * num_patches
         self.c_out = self.c_in
 
-        self.in_layer = DoubleConv(self.c_in, hidden * level_mult[0])
+        self.in_layer = DoubleConv(self.c_in, hidden * level_mult[0], dropout=dropout)
 
         level = 0
         self.down_conv_layers = []
@@ -172,7 +178,7 @@ class UNetPatched(nn.Module):
             hidden_in = hidden * level_mult[i]
             hidden_out= hidden * level_mult[i+1]
             self.down_conv_layers.append(
-                Down(hidden_in, hidden_out)
+                Down(hidden_in, hidden_out, dropout=dropout)
             )
             # self attention outputs shape (B, C, S, S) with C channels and S size
             # channels is the same as the layer before self attention outputs
@@ -181,7 +187,7 @@ class UNetPatched(nn.Module):
             # it is the input image size / num_patches / 2^x with x being the "level" the layer is at within the UNet
             if self.use_self_attention:
                 self.down_att_layers.append(
-                    SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level)
+                    SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level, dropout=dropout)
                 )
         self.down_conv_layers = nn.ModuleList(self.down_conv_layers)
         self.down_att_layers = nn.ModuleList(self.down_att_layers)
@@ -191,7 +197,7 @@ class UNetPatched(nn.Module):
         # for _ in range(num_middle_layers):
         #     self.middle_layers.append(DoubleConv(hidden_middle, hidden_middle))
         for _ in range(num_middle_layers):
-            self.middle_layers.append(DoubleConv(hidden_middle, hidden_middle))
+            self.middle_layers.append(DoubleConv(hidden_middle, hidden_middle, dropout=dropout))
         # # channel count of last middle layer has to fit the channel count of the skip connection with the lowest level
         # # i.e. hidden * factor of second last level
         # self.middle_layers.append(DoubleConv(hidden_middle, hidden * level_mult[-2]))
@@ -209,16 +215,16 @@ class UNetPatched(nn.Module):
             hidden_in = hidden * reversed_level_mult[i] + hidden * reversed_level_mult[i+1]
             hidden_out= hidden * reversed_level_mult[i+1]
             self.up_conv_layers.append(
-                Up(hidden_in, hidden_out)
+                Up(hidden_in, hidden_out, dropout=dropout)
             )
             if self.use_self_attention:
                 self.up_att_layers.append(
-                    SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level)
+                    SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level, dropout=dropout)
                 )
         self.up_conv_layers = nn.ModuleList(self.up_conv_layers)
         self.up_att_layers = nn.ModuleList(self.up_att_layers)
 
-        self.out_layer = DoubleConv(hidden * level_mult[0], self.c_out, hidden)
+        self.out_layer = DoubleConv(hidden * level_mult[0], self.c_out, hidden, dropout=0)
             
     def pos_encoding(self, t, channels):
         inv_freq = 1.0 / (

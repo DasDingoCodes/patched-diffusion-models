@@ -83,7 +83,8 @@ def train(args):
         hidden=args.hidden,
         num_patches=args.num_patches,
         level_mult = args.level_mult,
-        use_self_attention=False
+        use_self_attention=False,
+        dropout=args.dropout
     )
     if torch.cuda.device_count() > 1:
         model= nn.DataParallel(model,device_ids = args.device_ids)
@@ -142,8 +143,9 @@ def launch():
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 64
+    args.hidden = 128
     args.prediction_type = "noise"
+    args.dropout = 0.2
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)
