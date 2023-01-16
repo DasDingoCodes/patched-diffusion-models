@@ -15,12 +15,13 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=log
 
 
 class Diffusion:
-    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, img_size=256, device="cuda"):
+    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, img_size=256, device="cuda", prediction_type="noise"):
         self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
         self.img_size = img_size
         self.device = device
+        self.prediction_type = prediction_type
 
         self.beta = self.prepare_noise_schedule().to(device)
         self.alpha = 1. - self.beta
@@ -46,7 +47,6 @@ class Diffusion:
                 x = torch.randn((n, 3, self.img_size, self.img_size)).to(self.device)
             for i in tqdm(reversed(range(1, self.noise_steps)), position=0):
                 t = (torch.ones(n) * i).long().to(self.device)
-                predicted_noise = model(x, t)
                 alpha = self.alpha[t][:, None, None, None]
                 alpha_hat = self.alpha_hat[t][:, None, None, None]
                 beta = self.beta[t][:, None, None, None]
@@ -54,7 +54,11 @@ class Diffusion:
                     noise = torch.randn_like(x)
                 else:
                     noise = torch.zeros_like(x)
-                x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+                if self.prediction_type == "noise":
+                    predicted_noise = model(x, t)
+                    x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+                else:
+                    x = model(x, t) + torch.sqrt(beta) * noise
         model.train()
         x = (x.clamp(-1, 1) + 1) / 2
         x = (x * 255).type(torch.uint8)
@@ -68,11 +72,18 @@ def train(args):
     else:
         device = "cuda"
     dataloader = get_data(args)
+    prediction_type = args.prediction_type or "noise"
+    # prediction_type determines what the model returns
+    # "noise" means the model returns the noise of an input image
+    # "image" means the model returns the image without the noise
+    # "image" should work better with Patched Diffusion Models according to https://arxiv.org/pdf/2207.04316.pdf
+    assert prediction_type in ["noise", "image"]
     model = UNetPatched(
         img_shape=(3, args.image_size, args.image_size),
         hidden=args.hidden,
         num_patches=args.num_patches,
-        level_mult = args.level_mult
+        level_mult = args.level_mult,
+        use_self_attention=False
     )
     if torch.cuda.device_count() > 1:
         model= nn.DataParallel(model,device_ids = args.device_ids)
@@ -97,8 +108,12 @@ def train(args):
             images = images.to(device)
             t = diffusion.sample_timesteps(images.shape[0]).to(device)
             x_t, noise = diffusion.noise_images(images, t)
-            predicted_noise = model(x_t, t)
-            loss = mse(noise, predicted_noise)
+            if prediction_type == "noise":
+                predicted_noise = model(x_t, t)
+                loss = mse(noise, predicted_noise)
+            else:
+                predicted_x = model(x_t, t)
+                loss = mse(x_t - noise, predicted_x)
 
             optimizer.zero_grad()
             loss.backward()
@@ -115,19 +130,20 @@ def train(args):
 def launch():
     import argparse
     parser = argparse.ArgumentParser()
-    dataset = "celeba"
+    dataset = "animefaces"
     args = parser.parse_args()
     args.epochs = 1000
     args.steps_per_epoch = 1000
-    args.batch_size = 8
-    args.image_size = 128
-    args.num_patches = 4
+    args.batch_size = 32
+    args.image_size = 64
+    args.num_patches = 2
     args.level_mult = [1,2,4,8]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 256
+    args.hidden = 64
+    args.prediction_type = "noise"
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)
