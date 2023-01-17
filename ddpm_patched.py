@@ -224,7 +224,7 @@ class UNetPatched(nn.Module):
         self.up_conv_layers = nn.ModuleList(self.up_conv_layers)
         self.up_att_layers = nn.ModuleList(self.up_att_layers)
 
-        self.out_layer = DoubleConv(hidden * level_mult[0], self.c_out, hidden, dropout=0)
+        self.out_layer = nn.Conv2d(hidden * level_mult[0], self.c_out, kernel_size=3, padding=1, bias=False)
             
     def pos_encoding(self, t, channels):
         inv_freq = 1.0 / (

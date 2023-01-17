@@ -34,7 +34,8 @@ class Diffusion:
         sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None, None]
         sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])[:, None, None, None]
         Ɛ = torch.randn_like(x)
-        return sqrt_alpha_hat * x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ
+        prev_x = sqrt_alpha_hat * x
+        return prev_x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ, prev_x
 
     def sample_timesteps(self, n):
         return torch.randint(low=1, high=self.noise_steps, size=(n,))
@@ -91,7 +92,7 @@ def train(args):
     model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
-    diffusion = Diffusion(img_size=args.image_size, device=device)
+    diffusion = Diffusion(img_size=args.image_size, device=device, prediction_type=prediction_type)
     logger = SummaryWriter(os.path.join("runs", args.run_name))
     l = args.steps_per_epoch # len(dataloader)
 
@@ -108,13 +109,13 @@ def train(args):
 
             images = images.to(device)
             t = diffusion.sample_timesteps(images.shape[0]).to(device)
-            x_t, noise = diffusion.noise_images(images, t)
+            x_t, noise, prev_x = diffusion.noise_images(images, t)
             if prediction_type == "noise":
                 predicted_noise = model(x_t, t)
                 loss = mse(noise, predicted_noise)
             else:
                 predicted_x = model(x_t, t)
-                loss = mse(x_t - noise, predicted_x)
+                loss = mse(prev_x, predicted_x)
 
             optimizer.zero_grad()
             loss.backward()
@@ -144,8 +145,8 @@ def launch():
     args.device_ids = [2,3]
     args.lr = 3e-4
     args.hidden = 128
-    args.prediction_type = "noise"
-    args.dropout = 0.2
+    args.prediction_type = "image"
+    args.dropout = 0.0
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)
