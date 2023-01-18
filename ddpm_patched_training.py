@@ -1,6 +1,8 @@
 import os
 import torch
 import torch.nn as nn
+import numpy as np
+from pathlib import Path
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 from torch import optim
@@ -31,11 +33,21 @@ class Diffusion:
         return torch.linspace(self.beta_start, self.beta_end, self.noise_steps)
 
     def noise_images(self, x, t):
-        sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None, None]
-        sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])[:, None, None, None]
-        Ɛ = torch.randn_like(x)
-        prev_x = sqrt_alpha_hat * x
-        return prev_x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ, prev_x
+        if self.prediction_type == "noise":
+            sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None, None]
+            sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])[:, None, None, None]
+            Ɛ = torch.randn_like(x)
+            prev_x = sqrt_alpha_hat * x
+            return prev_x + sqrt_one_minus_alpha_hat * Ɛ, Ɛ, prev_x
+        else:
+            sqrt_alpha = torch.sqrt(self.alpha[t])[:, None, None, None]
+            prev_sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t-1])[:, None, None, None]
+            prev_sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t-1])[:, None, None, None]
+            prev_x = prev_sqrt_alpha_hat * x + prev_sqrt_one_minus_alpha_hat * torch.randn_like(x)
+            Ɛ = torch.randn_like(x)
+            this_beta = self.beta[t][:, None, None, None]
+            this_x = sqrt_alpha * prev_x + this_beta * Ɛ
+            return this_x, Ɛ, prev_x
 
     def sample_timesteps(self, n):
         return torch.randint(low=1, high=self.noise_steps, size=(n,))
@@ -59,7 +71,7 @@ class Diffusion:
                     predicted_noise = model(x, t)
                     x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
                 else:
-                    x = model(x, t) + torch.sqrt(beta) * noise
+                    x = 1 / torch.sqrt(alpha) * model(x, t) + torch.sqrt(beta) * noise
         model.train()
         x = (x.clamp(-1, 1) + 1) / 2
         x = (x * 255).type(torch.uint8)
@@ -101,7 +113,14 @@ def train(args):
     num_sample_imgs = 8*8
     noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(device)
 
+    losses = []
+
+    # avoid displaying matplotlib figures
+    plt.ioff()
+
+
     for epoch in range(args.epochs):
+        losses_epoch = 0
         logging.info(f"Starting epoch {epoch}:")
         pbar = tqdm(range(args.steps_per_epoch))
         for i in pbar:
@@ -123,10 +142,17 @@ def train(args):
 
             pbar.set_postfix(MSE=loss.item())
             logger.add_scalar("MSE", loss.item(), global_step=epoch * l + i)
+            losses_epoch += loss.item()
 
         sampled_images = diffusion.sample(model, n=num_sample_imgs, x=noise_sample)
         save_images(sampled_images, os.path.join("results", args.run_name, f"{epoch}.jpg"))
         torch.save(model.state_dict(), os.path.join("models", args.run_name, f"ckpt.pt"))
+        losses.append(losses_epoch / args.steps_per_epoch)
+        fig = plt.figure()
+        plt.plot(losses)
+        path_img = Path(f'results/{args.run_name}/losses.png')
+        fig.savefig(path_img)
+        plt.close(fig)
 
 
 def launch():
@@ -137,7 +163,7 @@ def launch():
     args.epochs = 1000
     args.steps_per_epoch = 1000
     args.batch_size = 32
-    args.image_size = 64
+    args.image_size = 32
     args.num_patches = 2
     args.level_mult = [1,2,4,8]
     args.dataset_path = f"data/{dataset}"
@@ -145,8 +171,8 @@ def launch():
     args.device_ids = [2,3]
     args.lr = 3e-4
     args.hidden = 128
-    args.prediction_type = "image"
-    args.dropout = 0.0
+    args.prediction_type = "noise"
+    args.dropout = 0.1
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)
