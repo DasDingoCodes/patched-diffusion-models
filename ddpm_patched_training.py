@@ -58,7 +58,7 @@ class Diffusion:
 
     def low_res_x(self, x):
         x_L = T.Resize(size=self.img_size//self.super_resolution_factor)(x)
-        x_L = T.Resize(size=self.img_size)(x)
+        x_L = T.Resize(size=self.img_size)(x_L)
         return x_L
 
     def sample_timesteps(self, n):
