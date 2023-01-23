@@ -64,13 +64,9 @@ class Diffusion:
     def sample_timesteps(self, n):
         return torch.randint(low=1, high=self.noise_steps, size=(n,))
 
-    def sample(self, model, n, prediction_type, x=None, imgs_high_res=None):
+    def sample(self, model, n, prediction_type, x=None, x_L=None):
         logging.info(f"Sampling {n} new images....")
         model.eval()
-        if imgs_high_res != None:
-            x_L = self.low_res_x(imgs_high_res)
-        else:
-            x_L = None
         with torch.no_grad():
             if x == None:
                 x = torch.randn((n, 3, self.img_size, self.img_size)).to(self.device)
@@ -142,13 +138,22 @@ def train(args):
     num_sample_imgs = 8*8
     noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(device)
     if prediction_type == "super_resolution":
-        sample_imgs_high_res, _ = next(iter(dataloader))
-        while sample_imgs_high_res.shape[0] < num_sample_imgs:
+        sample_imgs_from_dataset, _ = next(iter(dataloader))
+        while sample_imgs_from_dataset.shape[0] < num_sample_imgs:
             imgs_next_batch, _ = next(iter(dataloader))
-            sample_imgs_high_res = torch.concat((sample_imgs_high_res, imgs_next_batch))
-        sample_imgs_high_res = sample_imgs_high_res[:num_sample_imgs].to(device)
+            sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
+        sample_imgs_from_dataset = sample_imgs_from_dataset[:num_sample_imgs].to(device)
+        sample_imgs_from_dataset = diffusion.low_res_x(sample_imgs_from_dataset)
+        print(f"{torch.max(sample_imgs_from_dataset)=}")
+        print(f"{torch.min(sample_imgs_from_dataset)=}")
+        img_data = NormalizeInverse((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(sample_imgs_from_dataset)
+        print(f"{torch.max(img_data)=}")
+        print(f"{torch.min(img_data)=}")
+        img_data = img_data.clamp(0, 1)
+        img_data = (img_data * 255).type(torch.uint8)
+        save_images(img_data, os.path.join("results", args.run_name, f"sample_imgs_low_res.jpg"))
     else:
-        sample_imgs_high_res = None
+        sample_imgs_from_dataset = None
 
 
     losses = []
@@ -194,7 +199,7 @@ def train(args):
             n=num_sample_imgs, 
             prediction_type=prediction_type, 
             x=noise_sample,
-            imgs_high_res=sample_imgs_high_res
+            x_L=sample_imgs_from_dataset
         )
         save_images(sampled_images, os.path.join("results", args.run_name, f"{epoch}.jpg"))
         torch.save(model.state_dict(), os.path.join("models", args.run_name, f"ckpt.pt"))
