@@ -210,22 +210,22 @@ def train(args):
 def launch():
     import argparse
     parser = argparse.ArgumentParser()
-    dataset = "animefaces"
+    dataset = "celeba"
     args = parser.parse_args()
     args.epochs = 1000
     args.steps_per_epoch = 1000
     args.batch_size = 32
     args.image_size = 128
-    args.num_patches = 2
-    args.level_mult = [1,2,4,8]
+    args.num_patches = 4
+    args.level_mult = [1,2,4,4,8]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 32
+    args.hidden = 64
     args.prediction_type = "super_resolution"
     args.super_resolution_factor = 4
-    args.dropout = 0.0
+    args.dropout = 0.1
     args.use_self_attention = False
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
