@@ -121,7 +121,7 @@ def train(args):
         hidden=args.hidden,
         num_patches=args.num_patches,
         level_mult = args.level_mult,
-        use_self_attention=False,
+        use_self_attention=args.use_self_attention,
         dropout=args.dropout
     )
     if torch.cuda.device_count() > 1:
@@ -230,6 +230,7 @@ def launch():
     args.prediction_type = "super_resolution"
     args.super_resolution_factor = 4
     args.dropout = 0.0
+    args.use_self_attention = False
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)
