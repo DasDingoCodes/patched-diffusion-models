@@ -129,7 +129,7 @@ def train(args):
     model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
-    diffusion = Diffusion(img_size=args.image_size, device=device)
+    diffusion = Diffusion(img_size=args.image_size, device=device, super_resolution_factor=args.super_resolution_factor)
     logger = SummaryWriter(os.path.join("runs", args.run_name))
     l = args.steps_per_epoch # len(dataloader)
 
@@ -228,6 +228,7 @@ def launch():
     args.lr = 3e-4
     args.hidden = 32
     args.prediction_type = "super_resolution"
+    args.super_resolution_factor = 4
     args.dropout = 0.0
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
