@@ -217,7 +217,7 @@ def launch():
     args.batch_size = 32
     args.image_size = 128
     args.num_patches = 4
-    args.level_mult = [1,2,4,4,8]
+    args.level_mult = [1,2,4,8,16]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
