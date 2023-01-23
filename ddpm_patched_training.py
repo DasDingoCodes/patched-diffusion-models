@@ -12,17 +12,19 @@ from ddpm_modules import UNet
 import logging
 from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
+import torchvision.transforms as T
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S")
 
 
 class Diffusion:
-    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, img_size=256, device="cuda"):
+    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, img_size=256, device="cuda", super_resolution_factor=4):
         self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
         self.img_size = img_size
         self.device = device
+        self.super_resolution_factor = super_resolution_factor
 
         self.beta = self.prepare_noise_schedule().to(device)
         self.alpha = 1. - self.beta
@@ -47,13 +49,28 @@ class Diffusion:
             this_beta = self.beta[t][:, None, None, None]
             this_x = sqrt_alpha * prev_x + this_beta * Ɛ
             return this_x, Ɛ, prev_x
+    
+    def super_resolution_noise_data(self, x, t):
+        """Returns x_L (low resolution x), x_t (diffused difference between x and x_L at timestep t) and Ɛ (noise inserted into x_t at timestep t)"""
+        x_L = self.low_res_x(x)
+        x_t, Ɛ, _ = self.noise_images(x - x_L, t, prediction_type="noise")
+        return x_L, x_t, Ɛ
+
+    def low_res_x(self, x):
+        x_L = T.Resize(size=self.img_size//self.super_resolution_factor)(x)
+        x_L = T.Resize(size=self.img_size)(x)
+        return x_L
 
     def sample_timesteps(self, n):
         return torch.randint(low=1, high=self.noise_steps, size=(n,))
 
-    def sample(self, model, n, prediction_type, x=None):
+    def sample(self, model, n, prediction_type, x=None, imgs_high_res=None):
         logging.info(f"Sampling {n} new images....")
         model.eval()
+        if imgs_high_res != None:
+            x_L = self.low_res_x(imgs_high_res)
+        else:
+            x_L = None
         with torch.no_grad():
             if x == None:
                 x = torch.randn((n, 3, self.img_size, self.img_size)).to(self.device)
@@ -69,9 +86,18 @@ class Diffusion:
                 if prediction_type == "noise":
                     predicted_noise = model(x, t)
                     x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
-                else:
+                elif prediction_type == "image":
                     x = 1 / torch.sqrt(alpha) * model(x, t) + torch.sqrt(beta) * noise
+                elif prediction_type == "super_resolution":
+                    model_input = torch.concat((x_L, x), dim=1)
+                    predicted_noise = model(model_input, t)
+                    x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+
         model.train()
+        if prediction_type == "super_resolution" and x_L != None:
+            # if super_resolution, then model predicts difference between low res image x_L and high res image
+            # in that case, add x_L to the output of the model to get a high quality image
+            x += x_L
         x = (x.clamp(-1, 1) + 1) / 2
         x = (x * 255).type(torch.uint8)
         return x
@@ -89,9 +115,13 @@ def train(args):
     # "noise" means the model returns the noise of an input image
     # "image" means the model returns the image without the noise
     # "image" should work better with Patched Diffusion Models according to https://arxiv.org/pdf/2207.04316.pdf
-    assert prediction_type in ["noise", "image"]
+    assert prediction_type in ["noise", "image", "super_resolution"]
+    # if prediction_type is super_resolution, then the model gets not only diffusion step x_t as input
+    # but also the low resolution image x_L. Concat both together at dim=1 and you get 3+3=6 input channels
+    input_channels = 6 if prediction_type == "super_resolution" else 3
     model = UNetPatched(
-        img_shape=(3, args.image_size, args.image_size),
+        img_shape=(args.image_size, args.image_size),
+        input_channels=input_channels,
         hidden=args.hidden,
         num_patches=args.num_patches,
         level_mult = args.level_mult,
@@ -111,6 +141,15 @@ def train(args):
     # when saving images, 8 columns are default for grid
     num_sample_imgs = 8*8
     noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(device)
+    if prediction_type == "super_resolution":
+        sample_imgs_high_res, _ = next(iter(dataloader))
+        while sample_imgs_high_res.shape[0] < num_sample_imgs:
+            imgs_next_batch, _ = next(iter(dataloader))
+            sample_imgs_high_res = torch.concat((sample_imgs_high_res, imgs_next_batch))
+        sample_imgs_high_res = sample_imgs_high_res[:num_sample_imgs].to(device)
+    else:
+        sample_imgs_high_res = None
+
 
     losses = []
 
@@ -124,16 +163,23 @@ def train(args):
         pbar = tqdm(range(args.steps_per_epoch))
         for i in pbar:
             images, _ = next(iter(dataloader))
-
             images = images.to(device)
             t = diffusion.sample_timesteps(images.shape[0]).to(device)
-            x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
             if prediction_type == "noise":
+                x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
                 predicted_noise = model(x_t, t)
                 loss = mse(noise, predicted_noise)
-            else:
+            elif prediction_type == "image":
+                x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
                 predicted_x = model(x_t, t)
                 loss = mse(prev_x, predicted_x)
+            elif prediction_type == "super_resolution":
+                x_L, x_t, noise = diffusion.super_resolution_noise_data(images, t)
+                # Concat diffusion step x_t and low resolution image x_L at channel dimension dim=1
+                model_input = torch.concat((x_L, x_t), dim=1)
+                predicted_noise = model(model_input, t)
+                loss = mse(noise, predicted_noise)
+
 
             optimizer.zero_grad()
             loss.backward()
@@ -143,7 +189,13 @@ def train(args):
             logger.add_scalar("MSE", loss.item(), global_step=epoch * l + i)
             losses_epoch += loss.item()
 
-        sampled_images = diffusion.sample(model, n=num_sample_imgs, prediction_type=prediction_type, x=noise_sample)
+        sampled_images = diffusion.sample(
+            model, 
+            n=num_sample_imgs, 
+            prediction_type=prediction_type, 
+            x=noise_sample,
+            imgs_high_res=sample_imgs_high_res
+        )
         save_images(sampled_images, os.path.join("results", args.run_name, f"{epoch}.jpg"))
         torch.save(model.state_dict(), os.path.join("models", args.run_name, f"ckpt.pt"))
         losses.append(losses_epoch / args.steps_per_epoch)
@@ -162,7 +214,7 @@ def launch():
     args.epochs = 1000
     args.steps_per_epoch = 1000
     args.batch_size = 32
-    args.image_size = 32
+    args.image_size = 128
     args.num_patches = 2
     args.level_mult = [1,2,4,8]
     args.dataset_path = f"data/{dataset}"
@@ -170,7 +222,7 @@ def launch():
     args.device_ids = [2,3]
     args.lr = 3e-4
     args.hidden = 32
-    args.prediction_type = "noise"
+    args.prediction_type = "super_resolution"
     args.dropout = 0.0
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"

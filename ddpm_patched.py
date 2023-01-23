@@ -132,7 +132,9 @@ class Up(nn.Module):
 class UNetPatched(nn.Module):
     def __init__(
         self, 
-        img_shape=(3, 256, 256),
+        img_shape=(256, 256),
+        input_channels=3,
+        output_channels=3,
         time_dim=256, 
         hidden=64, 
         level_mult = [1,2,4,8],
@@ -152,8 +154,10 @@ class UNetPatched(nn.Module):
 
         self.num_levels = len(self.level_mult) - 1
 
-        
-        self.channels, self.height, self.width = img_shape
+
+        self.input_channels = input_channels
+        self.output_channels = output_channels        
+        self.height, self.width = img_shape
         assert self.height % num_patches == 0, "height of input images needs to be divisible by number of patches"
         assert self.width % num_patches == 0, "width of input images needs to be divisible by number of patches"
         assert self.height == self.width, "only allow square images for now"
@@ -165,8 +169,8 @@ class UNetPatched(nn.Module):
 
         # after patch extraction and reshaping the dimension of the first Convs input channel will be:
         # channels * num_patches * num_patches
-        self.c_in = self.channels * num_patches * num_patches
-        self.c_out = self.c_in
+        self.c_in = self.input_channels * num_patches * num_patches
+        self.c_out = self.output_channels * num_patches * num_patches
 
         self.in_layer = DoubleConv(self.c_in, hidden * level_mult[0], dropout=dropout)
 
