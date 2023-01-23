@@ -17,13 +17,12 @@ logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=log
 
 
 class Diffusion:
-    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, img_size=256, device="cuda", prediction_type="noise"):
+    def __init__(self, noise_steps=1000, beta_start=1e-4, beta_end=0.02, img_size=256, device="cuda"):
         self.noise_steps = noise_steps
         self.beta_start = beta_start
         self.beta_end = beta_end
         self.img_size = img_size
         self.device = device
-        self.prediction_type = prediction_type
 
         self.beta = self.prepare_noise_schedule().to(device)
         self.alpha = 1. - self.beta
@@ -32,8 +31,8 @@ class Diffusion:
     def prepare_noise_schedule(self):
         return torch.linspace(self.beta_start, self.beta_end, self.noise_steps)
 
-    def noise_images(self, x, t):
-        if self.prediction_type == "noise":
+    def noise_images(self, x, t, prediction_type):
+        if prediction_type == "noise":
             sqrt_alpha_hat = torch.sqrt(self.alpha_hat[t])[:, None, None, None]
             sqrt_one_minus_alpha_hat = torch.sqrt(1 - self.alpha_hat[t])[:, None, None, None]
             Ɛ = torch.randn_like(x)
@@ -52,7 +51,7 @@ class Diffusion:
     def sample_timesteps(self, n):
         return torch.randint(low=1, high=self.noise_steps, size=(n,))
 
-    def sample(self, model, n, x=None):
+    def sample(self, model, n, prediction_type, x=None):
         logging.info(f"Sampling {n} new images....")
         model.eval()
         with torch.no_grad():
@@ -67,7 +66,7 @@ class Diffusion:
                     noise = torch.randn_like(x)
                 else:
                     noise = torch.zeros_like(x)
-                if self.prediction_type == "noise":
+                if prediction_type == "noise":
                     predicted_noise = model(x, t)
                     x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
                 else:
@@ -104,7 +103,7 @@ def train(args):
     model.to(device)
     optimizer = optim.AdamW(model.parameters(), lr=args.lr)
     mse = nn.MSELoss()
-    diffusion = Diffusion(img_size=args.image_size, device=device, prediction_type=prediction_type)
+    diffusion = Diffusion(img_size=args.image_size, device=device)
     logger = SummaryWriter(os.path.join("runs", args.run_name))
     l = args.steps_per_epoch # len(dataloader)
 
@@ -128,7 +127,7 @@ def train(args):
 
             images = images.to(device)
             t = diffusion.sample_timesteps(images.shape[0]).to(device)
-            x_t, noise, prev_x = diffusion.noise_images(images, t)
+            x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
             if prediction_type == "noise":
                 predicted_noise = model(x_t, t)
                 loss = mse(noise, predicted_noise)
@@ -144,7 +143,7 @@ def train(args):
             logger.add_scalar("MSE", loss.item(), global_step=epoch * l + i)
             losses_epoch += loss.item()
 
-        sampled_images = diffusion.sample(model, n=num_sample_imgs, x=noise_sample)
+        sampled_images = diffusion.sample(model, n=num_sample_imgs, prediction_type=prediction_type, x=noise_sample)
         save_images(sampled_images, os.path.join("results", args.run_name, f"{epoch}.jpg"))
         torch.save(model.state_dict(), os.path.join("models", args.run_name, f"ckpt.pt"))
         losses.append(losses_epoch / args.steps_per_epoch)
@@ -170,9 +169,9 @@ def launch():
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 128
+    args.hidden = 32
     args.prediction_type = "noise"
-    args.dropout = 0.1
+    args.dropout = 0.0
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
     train(args)
