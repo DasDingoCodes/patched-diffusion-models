@@ -210,7 +210,7 @@ def train(args):
 def launch():
     import argparse
     parser = argparse.ArgumentParser()
-    dataset = "animefaces"
+    dataset = "celeba"
     args = parser.parse_args()
     args.epochs = 1000
     args.steps_per_epoch = 1000
