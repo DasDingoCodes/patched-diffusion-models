@@ -4,7 +4,7 @@ import torchvision
 from PIL import Image
 from pathlib import Path
 from matplotlib import pyplot as plt
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, random_split
 
 
 def plot_images(images):
@@ -22,7 +22,7 @@ def save_images(images, path, **kwargs):
     im.save(path)
 
 
-def get_data(args):
+def get_data(args, num_sample_imgs: int = 64):
     transforms = torchvision.transforms.Compose([
         torchvision.transforms.Resize(80),  # args.image_size + 1/4 *args.image_size
         torchvision.transforms.RandomResizedCrop(args.image_size, scale=(0.8, 1.0)),
@@ -30,8 +30,11 @@ def get_data(args):
         torchvision.transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))
     ])
     dataset = torchvision.datasets.ImageFolder(Path(args.dataset_path), transform=transforms)
-    dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
-    return dataloader
+    train_count = len(dataset) - num_sample_imgs
+    sample_dataset, train_dataset = random_split(dataset, (num_sample_imgs, train_count))
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    sample_dataloader = DataLoader(sample_dataset, batch_size=args.batch_size, shuffle=True)
+    return train_dataloader, sample_dataloader
 
 class NormalizeInverse(torchvision.transforms.Normalize):
     """

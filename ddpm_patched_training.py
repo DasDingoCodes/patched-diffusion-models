@@ -105,7 +105,6 @@ def train(args):
         device = args.device
     else:
         device = "cuda"
-    dataloader = get_data(args)
     prediction_type = args.prediction_type or "noise"
     # prediction_type determines what the model returns
     # "noise" means the model returns the noise of an input image
@@ -131,16 +130,17 @@ def train(args):
     mse = nn.MSELoss()
     diffusion = Diffusion(img_size=args.image_size, device=device, super_resolution_factor=args.super_resolution_factor)
     logger = SummaryWriter(os.path.join("runs", args.run_name))
-    l = args.steps_per_epoch # len(dataloader)
-
+    l = args.steps_per_epoch
+    
     # 8x8 grid of sample images with fixed random values
     # when saving images, 8 columns are default for grid
     num_sample_imgs = 8*8
+    train_dataloader, sample_dataloader = get_data(args, num_sample_imgs=num_sample_imgs)
     noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(device)
     if prediction_type == "super_resolution":
-        sample_imgs_from_dataset, _ = next(iter(dataloader))
+        sample_imgs_from_dataset, _ = next(iter(sample_dataloader))
         while sample_imgs_from_dataset.shape[0] < num_sample_imgs:
-            imgs_next_batch, _ = next(iter(dataloader))
+            imgs_next_batch, _ = next(iter(sample_dataloader))
             sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
         sample_imgs_from_dataset = sample_imgs_from_dataset[:num_sample_imgs].to(device)
         sample_imgs_from_dataset = diffusion.low_res_x(sample_imgs_from_dataset)
@@ -163,7 +163,7 @@ def train(args):
         logging.info(f"Starting epoch {epoch}:")
         pbar = tqdm(range(args.steps_per_epoch))
         for i in pbar:
-            images, _ = next(iter(dataloader))
+            images, _ = next(iter(train_dataloader))
             images = images.to(device)
             t = diffusion.sample_timesteps(images.shape[0]).to(device)
             if prediction_type == "noise":
