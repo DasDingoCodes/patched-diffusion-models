@@ -170,7 +170,7 @@ def train(args):
         img_data = NormalizeInverse((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(sample_imgs_from_dataset)
         img_data = img_data.clamp(0, 1)
         img_data = (img_data * 255).type(torch.uint8)
-        save_images(img_data, os.path.join("results", args.run_name, f"sample_imgs_low_res.jpg"))
+        save_images(img_data, os.path.join("results", args.run_name, f"sample_imgs_from_dataset.jpg"))
     else:
         sample_imgs_from_dataset = None
 
