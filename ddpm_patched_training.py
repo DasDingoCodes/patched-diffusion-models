@@ -1,16 +1,13 @@
 import os
 import torch
 import torch.nn as nn
-import numpy as np
 from pathlib import Path
 from matplotlib import pyplot as plt
 from tqdm import tqdm
 from torch import optim
 from ddpm_utils import *
 from ddpm_patched import UNetPatched
-from ddpm_modules import UNet
 import logging
-from torch.utils.tensorboard import SummaryWriter
 from datetime import datetime
 import torchvision.transforms as T
 
@@ -149,7 +146,6 @@ def train(args):
         super_resolution_factor=args.super_resolution_factor,
         noise_steps=args.noise_steps
     )
-    logger = SummaryWriter(os.path.join("runs", args.run_name))
     l = args.steps_per_epoch
     
     # 8x8 grid of sample images with fixed random values
@@ -210,13 +206,11 @@ def train(args):
                 predicted_noise = model(model_input, t)
                 loss = mse(noise, predicted_noise)
 
-
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             pbar.set_postfix(MSE=loss.item())
-            logger.add_scalar("MSE", loss.item(), global_step=epoch * l + i)
             losses_epoch += loss.item()
 
         sampled_images = diffusion.sample(
