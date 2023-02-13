@@ -231,6 +231,8 @@ def train(args):
 
 
 def launch():
+    _ = torch.manual_seed(1)
+    
     import argparse
     parser = argparse.ArgumentParser()
     dataset = "celeba"
