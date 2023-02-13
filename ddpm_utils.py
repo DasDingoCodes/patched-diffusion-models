@@ -5,6 +5,7 @@ from PIL import Image
 from pathlib import Path
 from matplotlib import pyplot as plt
 from torch.utils.data import DataLoader, random_split
+from torchmetrics.image.fid import FrechetInceptionDistance
 
 
 def plot_images(images):
@@ -34,6 +35,31 @@ def get_data(args, sample_percentage = 0.1):
     train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
     sample_dataloader = DataLoader(sample_dataset, batch_size=args.batch_size, shuffle=True)
     return train_dataloader, sample_dataloader
+
+def get_fid_init(args, batch_size=32, max_iter: int = None, feature: int = 64, normalize: bool = True):
+    """Returns FrechetInceptionDistance object initialised with values of given dataset.
+    See: https://torchmetrics.readthedocs.io/en/stable/image/frechet_inception_distance.html
+    
+    args.dataset_path: string of path to dataset
+    batch_size: batch_size for iterating through dataset, defaults to 32
+    max_iter: maximum number of iterations/batches that shall be used for FID calculation. Will run through entire dataset if max_iter = None
+    feature: indicates the inceptionv3 feature layer to choose. Can be one of the following: 64, 192, 768, 2048
+    normalize: whether to normalise images to [0,1]
+    """
+    transforms = torchvision.transforms.Compose([
+        torchvision.transforms.Resize(299),  # torchmetrics FID calculation rescales images to 299x299
+        torchvision.transforms.ToTensor(),
+    ])
+    dataset = torchvision.datasets.ImageFolder(Path(args.dataset_path), transform=transforms)
+    whole_dataset = DataLoader(dataset, batch_size=batch_size)
+    fid = FrechetInceptionDistance(feature=feature, normalize=normalize, reset_real_features=False)
+    for i, (x, _) in enumerate(whole_dataset):
+        if type(max_iter) == int and max_iter <= i:
+            break
+        print(f"{i}/{len(whole_dataset)}", end="\r")
+        fid.update(x, real=True)
+    return fid
+
 
 class NormalizeInverse(torchvision.transforms.Normalize):
     """
