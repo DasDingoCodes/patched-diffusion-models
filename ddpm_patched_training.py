@@ -10,6 +10,7 @@ from ddpm_patched import UNetPatched
 import logging
 from datetime import datetime
 import torchvision.transforms as T
+from torchmetrics.image.fid import FrechetInceptionDistance
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S")
 
@@ -153,24 +154,39 @@ def train(args):
     num_sample_imgs = 8*8
     train_dataloader, sample_dataloader = get_data(args, sample_percentage=0.1)
     noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(device)
-    if prediction_type == "super_resolution" or prediction_type == "colourise":
-        sample_imgs_from_dataset, _ = next(iter(sample_dataloader))
-        while sample_imgs_from_dataset.shape[0] < num_sample_imgs:
-            imgs_next_batch, _ = next(iter(sample_dataloader))
-            sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
-        sample_imgs_from_dataset = sample_imgs_from_dataset[:num_sample_imgs].to(device)
-        if prediction_type == "super_resolution":
-            sample_imgs_from_dataset = diffusion.low_res_x(sample_imgs_from_dataset)
-        elif prediction_type == "colourise":
-            sample_imgs_from_dataset = diffusion.grayscale(sample_imgs_from_dataset)
-        img_data = NormalizeInverse((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(sample_imgs_from_dataset)
-        img_data = img_data.clamp(0, 1)
-        img_data = (img_data * 255).type(torch.uint8)
-        save_images(img_data, os.path.join("results", args.run_name, f"sample_imgs_from_dataset.jpg"))
+    sample_imgs_from_dataset, _ = next(iter(sample_dataloader))
+    while sample_imgs_from_dataset.shape[0] < num_sample_imgs:
+        imgs_next_batch, _ = next(iter(sample_dataloader))
+        sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
+    sample_imgs_from_dataset = sample_imgs_from_dataset[:num_sample_imgs].to(device)
+
+    # Save sample images from dataset
+    sample_imgs_from_dataset_int = NormalizeInverse((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(sample_imgs_from_dataset)
+    sample_imgs_from_dataset_int = sample_imgs_from_dataset_int.clamp(0, 1)
+    sample_imgs_from_dataset_int = (sample_imgs_from_dataset_int * 255).type(torch.uint8)
+    save_images(sample_imgs_from_dataset_int, os.path.join("results", args.run_name, f"sample_imgs_from_dataset.jpg"))
+
+    # If model gets additional input image, create those inputs from the sample images
+    if prediction_type == "super_resolution":
+        sample_input_imgs = diffusion.low_res_x(sample_imgs_from_dataset)
+    elif prediction_type == "colourise":
+        sample_input_imgs = diffusion.grayscale(sample_imgs_from_dataset)
     else:
-        sample_imgs_from_dataset = None
+        sample_input_imgs = None
+    
+    # If model gets additional input image, save sample of those inputs as well
+    if sample_input_imgs != None:
+        sample_input_imgs_int = NormalizeInverse((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(sample_input_imgs)
+        sample_input_imgs_int = sample_input_imgs_int.clamp(0, 1)
+        sample_input_imgs_int = (sample_input_imgs_int * 255).type(torch.uint8)
+        save_images(sample_input_imgs_int, os.path.join("results", args.run_name, f"sample_input_imgs.jpg"))
 
+    # init FID object
+    fid = FrechetInceptionDistance(feature=64, normalize=False, reset_real_features=False)
+    fid_input = sample_imgs_from_dataset_int.to("cpu")
+    fid.update(fid_input, real=True)
 
+    fid_scores = []
     losses = []
 
     # avoid displaying matplotlib figures
@@ -218,10 +234,23 @@ def train(args):
             n=num_sample_imgs, 
             prediction_type=prediction_type, 
             x=noise_sample,
-            original_imgs=sample_imgs_from_dataset
+            original_imgs=sample_input_imgs
         )
         save_images(sampled_images, os.path.join("results", args.run_name, f"{epoch}.jpg"))
         torch.save(model.state_dict(), os.path.join("models", args.run_name, f"ckpt.pt"))
+        
+        # update fid_scores
+        fid.update(sampled_images.to("cpu"), real=False)
+        fid_score = fid.compute().item()
+        fid.reset()
+        fid_scores.append(fid_score)
+        fig = plt.figure()
+        plt.plot(fid_scores)
+        path_img = Path(f'results/{args.run_name}/fid_scores.png')
+        fig.savefig(path_img)
+        plt.close(fig)
+
+        # update losses
         losses.append(losses_epoch / args.steps_per_epoch)
         fig = plt.figure()
         plt.plot(losses)
@@ -232,10 +261,10 @@ def train(args):
 
 def launch():
     _ = torch.manual_seed(1)
-    
+
     import argparse
     parser = argparse.ArgumentParser()
-    dataset = "celeba"
+    dataset = "animefaces"
     args = parser.parse_args()
     args.epochs = 1000
     args.steps_per_epoch = 1000
@@ -243,7 +272,7 @@ def launch():
     args.batch_size = 32
     args.image_size = 128
     args.num_patches = 2
-    args.level_mult = [1,2,24]
+    args.level_mult = [1,2,4]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
@@ -251,7 +280,7 @@ def launch():
     args.hidden = 32
     args.prediction_type = "colourise"
     args.super_resolution_factor = 4 # is ignored if prediction_type is not super_resolution
-    args.dropout = 0.01
+    args.dropout = 0.00
     args.use_self_attention = False
     time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
