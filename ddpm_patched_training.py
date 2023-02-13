@@ -155,7 +155,7 @@ def train(args):
     # 8x8 grid of sample images with fixed random values
     # when saving images, 8 columns are default for grid
     num_sample_imgs = 8*8
-    train_dataloader, sample_dataloader = get_data(args, num_sample_imgs=num_sample_imgs)
+    train_dataloader, sample_dataloader = get_data(args, sample_percentage=0.1)
     noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(device)
     if prediction_type == "super_resolution" or prediction_type == "colourise":
         sample_imgs_from_dataset, _ = next(iter(sample_dataloader))
@@ -247,12 +247,12 @@ def launch():
     args.batch_size = 32
     args.image_size = 128
     args.num_patches = 2
-    args.level_mult = [1,2,2,4,4]
+    args.level_mult = [1,2,24]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 256
+    args.hidden = 32
     args.prediction_type = "colourise"
     args.super_resolution_factor = 4 # is ignored if prediction_type is not super_resolution
     args.dropout = 0.01
