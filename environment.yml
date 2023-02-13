@@ -3,6 +3,7 @@ channels:
   - pytorch
   - nvidia
   - defaults
+  - conda-forge
 dependencies:
   - python==3.8
   - pytorch-cuda=11.7
@@ -12,4 +13,5 @@ dependencies:
   - jupyter
   - matplotlib
   - tqdm
+  - torchmetrics
 prefix: C:\Users\david\miniconda3\envs\my_pytorch
