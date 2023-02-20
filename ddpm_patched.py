@@ -133,7 +133,7 @@ class ConditionalInjection(nn.Module):
     def __init__(self, x_in_channels, conditional_in_channels, out_channels, downscaling_factor, dropout=0.0):
         super().__init__()
 
-        self.downscaling = nn.MaxPool2d(downscaling_factor)
+        self.downscaling = nn.AvgPool2d(downscaling_factor)
         self.conv = DoubleConv(x_in_channels + conditional_in_channels, out_channels, dropout=dropout)
     
     def forward(self, x, conditional):
