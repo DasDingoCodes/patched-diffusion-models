@@ -11,6 +11,7 @@ import logging
 from datetime import datetime
 import torchvision.transforms as T
 from torchmetrics.image.fid import FrechetInceptionDistance
+from csv import DictWriter
 
 logging.basicConfig(format="%(asctime)s - %(levelname)s: %(message)s", level=logging.INFO, datefmt="%I:%M:%S")
 
@@ -187,6 +188,13 @@ def train(args):
     # avoid displaying matplotlib figures
     plt.ioff()
 
+    path_stats = Path(f'results/{args.run_name}/stats.csv')
+    headersCSV = ['MSE','FID']
+    with open(path_stats, 'a', newline='') as f_object:
+        dictwriter_object = DictWriter(f_object, fieldnames=headersCSV)
+        dictwriter_object.writeheader()
+        f_object.close()
+
 
     for epoch in range(args.epochs):
         losses_epoch = 0
@@ -241,12 +249,19 @@ def train(args):
         plt.close(fig)
 
         # update losses
-        losses.append(losses_epoch / args.steps_per_epoch)
+        loss = losses_epoch / args.steps_per_epoch
+        losses.append(loss)
         fig = plt.figure()
         plt.plot(losses)
         path_img = Path(f'results/{args.run_name}/losses.png')
         fig.savefig(path_img)
         plt.close(fig)
+
+        stats = {"MSE": loss, "FID": fid_score}
+        with open(path_stats, 'a', newline='') as f_object:
+            dictwriter_object = DictWriter(f_object, fieldnames=headersCSV)
+            dictwriter_object.writerow(stats)
+            f_object.close()
 
 
 def launch():
@@ -269,7 +284,7 @@ def launch():
     args.lr = 3e-4
     args.hidden = 32
     args.prediction_type = "noise"
-    args.image_retouching_type = "colourise"
+    args.image_retouching_type = "super_resolution"
     args.super_resolution_factor = 4 # is ignored if prediction_type is not super_resolution
     args.dropout = 0.00
     args.use_self_attention = False
