@@ -129,6 +129,18 @@ class Up(nn.Module):
         return x + emb
 
 
+class ConditionalInjection(nn.Module):
+    def __init__(self, x_in_channels, conditional_in_channels, out_channels, downscaling_factor, dropout=0.0):
+        super().__init__()
+
+        self.downscaling = nn.MaxPool2d(downscaling_factor)
+        self.conv = DoubleConv(x_in_channels + conditional_in_channels, out_channels, dropout=dropout)
+    
+    def forward(self, x, conditional):
+        conditional = self.downscaling(conditional)
+        x = torch.concat((x, conditional), dim=1)
+        return self.conv(x)
+
 class UNetPatched(nn.Module):
     def __init__(
         self, 
@@ -141,6 +153,8 @@ class UNetPatched(nn.Module):
         num_middle_layers = 3,
         num_patches=4,
         use_self_attention=True,
+        use_conditional_image=False,
+        conditional_img_channels=3,
         device="cuda",
         dropout=0.0
     ):
@@ -150,6 +164,8 @@ class UNetPatched(nn.Module):
         self.level_mult = level_mult
         self.num_patches = num_patches
         self.use_self_attention = use_self_attention
+        self.use_conditional_image = use_conditional_image
+        self.conditional_img_channels = conditional_img_channels
         self.dropout = dropout
 
         self.num_levels = len(self.level_mult) - 1
@@ -177,6 +193,7 @@ class UNetPatched(nn.Module):
         level = 0
         self.down_conv_layers = []
         self.down_att_layers = []
+        self.down_conditional_layers = []
         for i in range(self.num_levels):
             level += 1
             hidden_in = hidden * level_mult[i]
@@ -184,9 +201,26 @@ class UNetPatched(nn.Module):
             self.down_conv_layers.append(
                 Down(hidden_in, hidden_out, dropout=dropout)
             )
+            # conditional image layers take in x and the conditional image
+            # they have to know the output channels of the previous layer (hidden_out),
+            # the channels of the conditional image (conditional_img_channels)
+            # the conditional layer shold output the same shape as the previous layer
+            # so it too will output hidden_out
+            # the conditional image has to be scaled down to the size of the x at that layer
+            # the downscaling factor will be num_patches * 2^x with x being the "level" the layer is at within the UNet
+            if self.use_conditional_image:
+                self.down_conditional_layers.append(
+                    ConditionalInjection(
+                        hidden_out,
+                        self.conditional_img_channels,
+                        hidden_out,
+                        self.num_patches * 2**level, 
+                        dropout=dropout
+                    )
+                )
             # self attention outputs shape (B, C, S, S) with C channels and S size
             # channels is the same as the layer before self attention outputs
-            # i.e. what is given as the second parameter of Down instance (hidden*2 in this case)
+            # i.e. (if we ignore the conditional layer) what is given as the second parameter of Down instance (hidden_out)
             # size is also the same as the previous layer outputs but we first have to calculate the size
             # it is the input image size / num_patches / 2^x with x being the "level" the layer is at within the UNet
             if self.use_self_attention:
@@ -194,6 +228,7 @@ class UNetPatched(nn.Module):
                     SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level, dropout=dropout)
                 )
         self.down_conv_layers = nn.ModuleList(self.down_conv_layers)
+        self.down_conditional_layers = nn.ModuleList(self.down_conditional_layers)
         self.down_att_layers = nn.ModuleList(self.down_att_layers)
         
         self.middle_layers = []
@@ -256,7 +291,7 @@ class UNetPatched(nn.Module):
         x = x.permute(0,2,1,3).reshape(B, H*p, W*p, C//(p*p))
         return x.permute(0, 3, 1, 2)
 
-    def forward(self, x, t):
+    def forward(self, x, t, conditional_image=None):
         t = t.unsqueeze(-1).type(torch.float)
         t = self.pos_encoding(t, self.time_dim)
 
@@ -269,6 +304,9 @@ class UNetPatched(nn.Module):
             x_down_list.append(x)
             conv = self.down_conv_layers[i]
             x = conv(x, t)
+            if conditional_image != None:
+                conditional = self.down_conditional_layers[i]
+                x = conditional(x, conditional_image)
             if self.use_self_attention:
                 att = self.down_att_layers[i]
                 x = att(x)

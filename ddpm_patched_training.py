@@ -87,22 +87,13 @@ class Diffusion:
                 else:
                     noise = torch.zeros_like(x)
                 if prediction_type == "noise":
-                    predicted_noise = model(x, t)
+                    predicted_noise = model(x, t, conditional_image=original_imgs)
                     x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
                 elif prediction_type == "image":
-                    x = 1 / torch.sqrt(alpha) * model(x, t) + torch.sqrt(beta) * noise
-                elif prediction_type == "super_resolution":
-                    model_input = torch.concat((original_imgs, x), dim=1)
-                    predicted_noise = model(model_input, t)
-                    x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
-                elif prediction_type == "colourise":
-                    model_input = torch.concat((original_imgs, x), dim=1)
-                    predicted_noise = model(model_input, t)
-                    x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+                    x = 1 / torch.sqrt(alpha) * model(x, t, conditional_image=original_imgs) + torch.sqrt(beta) * noise
 
-        image_retouching_types = ["super_resolution", "colourise"]
         model.train()
-        if prediction_type in image_retouching_types and original_imgs != None:
+        if original_imgs != None:
             # if image retouching, then model predicts difference between original_imgs and wanted images
             # in that case, add original_imgs to the output of the model to get a prediction for the wanted image
             x += original_imgs
@@ -122,11 +113,14 @@ def train(args):
     # "noise" means the model returns the noise of an input image
     # "image" means the model returns the image without the noise
     # "image" should work better with Patched Diffusion Models according to https://arxiv.org/pdf/2207.04316.pdf
-    assert prediction_type in ["noise", "image", "super_resolution", "colourise"]
-    image_retouching_types = ["super_resolution", "colourise"]
-    # if prediction_type is of the image retouching type, then the model gets not only diffusion step x_t as input
-    # but also the original image. Concat both x_t and the original image together at dim=1 and you get 3+3=6 input channels
-    input_channels = 6 if prediction_type in image_retouching_types else 3
+    assert prediction_type in ["noise", "image"]
+
+    image_retouching_types = ["super_resolution", "colourise", None]
+    image_retouching_type = args.image_retouching_type
+    assert image_retouching_type in image_retouching_types
+    use_conditional_image = image_retouching_type != None
+
+    input_channels = 3
     model = UNetPatched(
         img_shape=(args.image_size, args.image_size),
         input_channels=input_channels,
@@ -134,6 +128,7 @@ def train(args):
         num_patches=args.num_patches,
         level_mult = args.level_mult,
         use_self_attention=args.use_self_attention,
+        use_conditional_image=use_conditional_image,
         dropout=args.dropout
     )
     if torch.cuda.device_count() > 1:
@@ -167,9 +162,9 @@ def train(args):
     save_images(sample_imgs_from_dataset_int, os.path.join("results", args.run_name, f"sample_imgs_from_dataset.jpg"))
 
     # If model gets additional input image, create those inputs from the sample images
-    if prediction_type == "super_resolution":
+    if image_retouching_type == "super_resolution":
         sample_input_imgs = diffusion.low_res_x(sample_imgs_from_dataset)
-    elif prediction_type == "colourise":
+    elif image_retouching_type == "colourise":
         sample_input_imgs = diffusion.grayscale(sample_imgs_from_dataset)
     else:
         sample_input_imgs = None
@@ -201,26 +196,21 @@ def train(args):
             images, _ = next(iter(train_dataloader))
             images = images.to(device)
             t = diffusion.sample_timesteps(images.shape[0]).to(device)
+
+            if image_retouching_type == "super_resolution":
+                conditional, x_t, noise = diffusion.super_resolution_noise_data(images, t)
+            elif image_retouching_type == "colourise":
+                conditional, x_t, noise = diffusion.colourise_noise_data(images, t)
+            else:
+                x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
+                conditional = None
+
+            prediction = model(x_t, t, conditional_image=conditional)
+
             if prediction_type == "noise":
-                x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
-                predicted_noise = model(x_t, t)
-                loss = mse(noise, predicted_noise)
+                loss = mse(noise, prediction)
             elif prediction_type == "image":
-                x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
-                predicted_x = model(x_t, t)
-                loss = mse(prev_x, predicted_x)
-            elif prediction_type == "super_resolution":
-                x_L, x_t, noise = diffusion.super_resolution_noise_data(images, t)
-                # Concat diffusion step x_t and low resolution image x_L at channel dimension dim=1
-                model_input = torch.concat((x_L, x_t), dim=1)
-                predicted_noise = model(model_input, t)
-                loss = mse(noise, predicted_noise)
-            elif prediction_type == "colourise":
-                x_g, x_t, noise = diffusion.colourise_noise_data(images, t)
-                # Concat diffusion step x_t and grayscaled image x_g at channel dimension dim=1
-                model_input = torch.concat((x_g, x_t), dim=1)
-                predicted_noise = model(model_input, t)
-                loss = mse(noise, predicted_noise)
+                loss = mse(prev_x, prediction)
 
             optimizer.zero_grad()
             loss.backward()
@@ -278,7 +268,8 @@ def launch():
     args.device_ids = [2,3]
     args.lr = 3e-4
     args.hidden = 32
-    args.prediction_type = "colourise"
+    args.prediction_type = "noise"
+    args.image_retouching_type = "colourise"
     args.super_resolution_factor = 4 # is ignored if prediction_type is not super_resolution
     args.dropout = 0.00
     args.use_self_attention = False
