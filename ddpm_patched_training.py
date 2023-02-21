@@ -275,7 +275,7 @@ def launch():
     args.steps_per_epoch = 1000
     args.noise_steps = 250
     args.batch_size = 32
-    args.image_size = 128
+    args.image_size = 256
     args.num_patches = 2
     args.level_mult = [1,2,2,4,4]
     args.dataset_path = f"data/{dataset}"
