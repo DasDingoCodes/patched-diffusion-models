@@ -269,7 +269,7 @@ def launch():
 
     import argparse
     parser = argparse.ArgumentParser()
-    dataset = "animefaces"
+    dataset = "celeba"
     args = parser.parse_args()
     args.epochs = 1000
     args.steps_per_epoch = 1000
@@ -277,12 +277,12 @@ def launch():
     args.batch_size = 32
     args.image_size = 128
     args.num_patches = 2
-    args.level_mult = [1,2,4]
+    args.level_mult = [1,2,2,4,4]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 32
+    args.hidden = 128
     args.prediction_type = "noise"
     args.image_retouching_type = "super_resolution"
     args.super_resolution_factor = 4 # is ignored if prediction_type is not super_resolution
