@@ -189,6 +189,14 @@ class UNetPatched(nn.Module):
         self.c_out = self.output_channels * num_patches * num_patches
 
         self.in_layer = DoubleConv(self.c_in, hidden * level_mult[0], dropout=dropout)
+        if self.use_conditional_image:
+            self.in_layer_conditional = ConditionalInjection(
+                hidden * level_mult[0],
+                self.conditional_img_channels,
+                hidden * level_mult[0],
+                self.num_patches, 
+                dropout=dropout
+            )
 
         level = 0
         self.down_conv_layers = []
@@ -245,6 +253,7 @@ class UNetPatched(nn.Module):
         reversed_level_mult = list(reversed(level_mult))
         self.up_conv_layers = []
         self.up_att_layers = []
+        self.up_conditional_layers = []
         for i in range(self.num_levels):
             level -= 1
             # hidden in takes in the output of the previous layer 
@@ -256,12 +265,31 @@ class UNetPatched(nn.Module):
             self.up_conv_layers.append(
                 Up(hidden_in, hidden_out, dropout=dropout)
             )
+            if self.use_conditional_image:
+                self.up_conditional_layers.append(
+                    ConditionalInjection(
+                        hidden_out,
+                        self.conditional_img_channels,
+                        hidden_out,
+                        self.num_patches * 2**level, 
+                        dropout=dropout
+                    )
+                )
             if self.use_self_attention:
                 self.up_att_layers.append(
                     SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level, dropout=dropout)
                 )
         self.up_conv_layers = nn.ModuleList(self.up_conv_layers)
+        self.up_conditional_layers = nn.ModuleList(self.up_conditional_layers)
         self.up_att_layers = nn.ModuleList(self.up_att_layers)
+        if self.use_conditional_image:
+            self.out_layer_conditional = ConditionalInjection(
+                hidden * level_mult[0],
+                self.conditional_img_channels,
+                hidden * level_mult[0],
+                self.num_patches, 
+                dropout=dropout
+            )
 
         self.out_layer = nn.Conv2d(hidden * level_mult[0], self.c_out, kernel_size=3, padding=1, bias=False)
             
@@ -297,6 +325,8 @@ class UNetPatched(nn.Module):
 
         x = self.to_patches(x, patch_size=self.num_patches)
         x = self.in_layer(x)
+        if conditional_image != None:
+            x = self.in_layer_conditional(x, conditional_image)
 
         # Down
         x_down_list = []
@@ -318,10 +348,15 @@ class UNetPatched(nn.Module):
             conv = self.up_conv_layers[i]
             x_skip = x_down_list[ self.num_levels-1 - i ]
             x = conv(x, x_skip, t)
+            if conditional_image != None:
+                conditional = self.up_conditional_layers[i]
+                x = conditional(x, conditional_image)
             if self.use_self_attention:
                 att = self.up_att_layers[i]
                 x = att(x)
 
+        if conditional_image != None:
+            x = self.out_layer_conditional(x, conditional_image)
         x = self.out_layer(x)
 
         output = self.from_patches(x, patch_size=self.num_patches)
