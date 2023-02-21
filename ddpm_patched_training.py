@@ -274,7 +274,7 @@ def launch():
     args.epochs = 1000
     args.steps_per_epoch = 1000
     args.noise_steps = 250
-    args.batch_size = 32
+    args.batch_size = 16
     args.image_size = 256
     args.num_patches = 2
     args.level_mult = [1,2,2,2,2]
