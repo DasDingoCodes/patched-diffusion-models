@@ -61,6 +61,13 @@ class Diffusion:
         x_t, Ɛ, _ = self.noise_images(x - x_g, t, prediction_type="noise")
         return x_g, x_t, Ɛ
 
+    def inpainting_noise_data(self, x, t, mask):
+        """Returns x_masked (x with masked area removed), x_t (diffused difference between x and x_masked at timestep t) and Ɛ (noise inserted into x_t at timestep t)"""
+        x_masked = remove_masked_area(x, mask)
+        x_t, Ɛ, _ = self.noise_images(x - x_masked, t, prediction_type="noise")
+        return x_masked, x_t, Ɛ
+
+
     def low_res_x(self, x):
         x_L = T.Resize(size=self.img_size//self.super_resolution_factor)(x)
         x_L = T.Resize(size=self.img_size)(x_L)
@@ -116,7 +123,7 @@ def train(args):
     # "image" should work better with Patched Diffusion Models according to https://arxiv.org/pdf/2207.04316.pdf
     assert prediction_type in ["noise", "image"]
 
-    image_retouching_types = ["super_resolution", "colourise", None]
+    image_retouching_types = ["super_resolution", "colourise", "inpainting", None]
     image_retouching_type = args.image_retouching_type
     assert image_retouching_type in image_retouching_types
     use_conditional_image = image_retouching_type != None
@@ -148,12 +155,21 @@ def train(args):
     # 8x8 grid of sample images with fixed random values
     # when saving images, 8 columns are default for grid
     num_sample_imgs = 8*8
-    train_dataloader, sample_dataloader = get_data(args, sample_percentage=0.1)
     noise_sample = torch.randn((num_sample_imgs, 3, args.image_size, args.image_size)).to(device)
-    sample_imgs_from_dataset, _ = next(iter(sample_dataloader))
-    while sample_imgs_from_dataset.shape[0] < num_sample_imgs:
-        imgs_next_batch, _ = next(iter(sample_dataloader))
-        sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
+    if image_retouching_type != "inpainting":
+        train_dataloader, sample_dataloader = get_data(args, sample_percentage=0.1)
+        sample_imgs_from_dataset, _ = next(iter(sample_dataloader))
+        while sample_imgs_from_dataset.shape[0] < num_sample_imgs:
+            imgs_next_batch, _ = next(iter(sample_dataloader))
+            sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
+    else:
+        train_dataloader, sample_dataloader = get_data_img_mask_text(args, sample_percentage=0.1)
+        sample_imgs_from_dataset, sample_masks_from_dataset, _ = next(iter(sample_dataloader))
+        while sample_imgs_from_dataset.shape[0] < num_sample_imgs:
+            imgs_next_batch, masks_next_batch, _ = next(iter(sample_dataloader))
+            sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
+            sample_masks_from_dataset = torch.concat((sample_masks_from_dataset, masks_next_batch))
+        sample_masks_from_dataset = sample_masks_from_dataset[:num_sample_imgs].to(device)
     sample_imgs_from_dataset = sample_imgs_from_dataset[:num_sample_imgs].to(device)
 
     # Save sample images from dataset
@@ -167,6 +183,8 @@ def train(args):
         sample_input_imgs = diffusion.low_res_x(sample_imgs_from_dataset)
     elif image_retouching_type == "colourise":
         sample_input_imgs = diffusion.grayscale(sample_imgs_from_dataset)
+    elif image_retouching_type == "inpainting":
+        sample_input_imgs = remove_masked_area(sample_imgs_from_dataset, sample_masks_from_dataset)
     else:
         sample_input_imgs = None
     
@@ -201,7 +219,12 @@ def train(args):
         logging.info(f"Starting epoch {epoch}:")
         pbar = tqdm(range(args.steps_per_epoch))
         for i in pbar:
-            images, _ = next(iter(train_dataloader))
+            
+            if image_retouching_type != "inpainting":
+                images, _ = next(iter(train_dataloader))
+            else:
+                images, masks, texts = next(iter(train_dataloader))
+                masks = masks.to(device)
             images = images.to(device)
             t = diffusion.sample_timesteps(images.shape[0]).to(device)
 
@@ -209,6 +232,8 @@ def train(args):
                 conditional, x_t, noise = diffusion.super_resolution_noise_data(images, t)
             elif image_retouching_type == "colourise":
                 conditional, x_t, noise = diffusion.colourise_noise_data(images, t)
+            elif image_retouching_type == "inpainting":
+                conditional, x_t, noise = diffusion.inpainting_noise_data(images, t, masks)
             else:
                 x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
                 conditional = None
@@ -270,26 +295,34 @@ def launch():
     import argparse
     parser = argparse.ArgumentParser()
     dataset = "celeba"
+    time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
     args = parser.parse_args()
     args.epochs = 1000
     args.steps_per_epoch = 1000
     args.noise_steps = 250
     args.batch_size = 16
-    args.image_size = 256
+    args.image_size = 128
     args.num_patches = 2
-    args.level_mult = [1,2,2,2,2]
+    args.level_mult = [1,2,4]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 128
-    args.prediction_type = "noise"
-    args.image_retouching_type = "super_resolution"
-    args.super_resolution_factor = 4 # is ignored if prediction_type is not super_resolution
+    args.hidden = 32
     args.dropout = 0.00
     args.use_self_attention = False
-    time_str = datetime.now().strftime('%Y-%m-%dT%H-%M-%S')
+    args.prediction_type = "noise"
+    args.image_retouching_type = "inpainting"
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
+
+    # super_resolution arguments
+    args.super_resolution_factor = 4
+    
+    # inpainting arguments
+    args.inpainting_image_dir = Path("data/CelebAMask-HQ/CelebA-HQ-img")
+    args.inpainting_mask_dir = Path("data/CelebAMask-HQ/hair_masks")
+    args.inpainting_text_dir = Path("data/CelebAMask-HQ/labels")
+    args.inpainting_texts_per_img = 10
     train(args)
 
 
