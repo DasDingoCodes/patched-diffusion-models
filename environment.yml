@@ -14,4 +14,5 @@ dependencies:
   - matplotlib
   - tqdm
   - torchmetrics
+  - scikit-image
 prefix: C:\Users\david\miniconda3\envs\my_pytorch
