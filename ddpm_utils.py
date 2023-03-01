@@ -1,12 +1,15 @@
 import os
 import torch
 import torchvision
+from torchvision import transforms
 from PIL import Image
 from pathlib import Path
 from matplotlib import pyplot as plt
-from torch.utils.data import DataLoader, random_split
+from torch.utils.data import Dataset, DataLoader, random_split
 from torchmetrics.image.fid import FrechetInceptionDistance
-
+import numpy as np
+import torchvision.transforms.functional as TF
+from skimage import io
 
 def plot_images(images):
     plt.figure(figsize=(32, 32))
@@ -81,3 +84,98 @@ def setup_logging(run_name):
     os.makedirs("results", exist_ok=True)
     os.makedirs(os.path.join("models", run_name), exist_ok=True)
     os.makedirs(os.path.join("results", run_name), exist_ok=True)
+
+def get_data_img_mask_text(args, sample_percentage):
+    dataset = TextMaskDataset(
+        image_dir=args.inpainting_image_dir,
+        mask_dir=args.inpainting_mask_dir,
+        text_dir=args.inpainting_text_dir,
+        texts_per_img=args.inpainting_texts_per_img,
+        img_size=args.image_size
+    )
+    sample_dataset, train_dataset = random_split(dataset, (sample_percentage, 1.0 - sample_percentage))
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
+    sample_dataloader = DataLoader(sample_dataset, batch_size=args.batch_size, shuffle=True)
+    return train_dataloader, sample_dataloader
+
+class TextMaskDataset(Dataset):
+    """Images with masks and descriptions"""
+
+    def __init__(self, image_dir, mask_dir, text_dir, texts_per_img=10, img_size=128):
+        """
+        Args:
+            image_dir: Path of directory containing image files. All images are .jpg files and are named only with an index
+            mask_dir: Path of directory containing mask files. All masks are .png files and are named only with an index
+            text_dir: Path of directory containing text files. All texts are .txt files and are named only with an index. Each line of a text file contains a description of the corresponding image
+            texts_per_img: How many descriptions there are for each image, defaults to 10
+            img_size: height and width which the images shall be scaled to, defaults to 128
+        """
+        self.path_image_dir = Path(image_dir)
+        self.path_mask_dir = Path(mask_dir)
+        self.path_text_dir = Path(text_dir)
+        self.texts_per_img = texts_per_img
+        self.img_size = img_size
+
+        self.descriptions = []
+        # self._init_descriptions()
+    
+    def _init_descriptions(self):
+        self.descriptions = []
+        total_file_count = self.__len__()
+        for i in range(total_file_count):
+            text_file = self.path_text_dir / f"{i}.txt"
+            img_descriptions = text_file.read_text().split("\n")
+            img_descriptions = [x.strip() for x in img_descriptions if x.strip()][:self.texts_per_img]
+            self.descriptions.append(img_descriptions)
+            print(f"Initialising descriptions... {i+1}/{total_file_count}", end="\r")
+        print("\nFinished initialising texts!")
+
+    def __len__(self):
+        return len([x for x in self.path_image_dir.iterdir()])
+    
+    def __getitem__(self, idx):
+        if torch.is_tensor(idx):
+            idx = idx.tolist()
+        
+        path_img = self.path_image_dir / f"{idx}.jpg"
+        path_mask = self.path_mask_dir / f"{idx}.png"
+
+        image = io.imread(path_img)
+        mask = io.imread(path_mask)
+        # text = self.descriptions[idx][np.random.randint(self.texts_per_img)]
+        text = ""
+
+        # transforms
+        # To Tensor
+        image = transforms.ToTensor()(image)
+        mask = transforms.ToTensor()(mask)
+
+        # Resize 
+        resize = transforms.Resize(size=(self.img_size + 10, self.img_size + 10))
+        image = resize(image)
+        mask = resize(mask)
+
+        # Random crop
+        i, j, h, w = transforms.RandomCrop.get_params(
+            image, output_size=(self.img_size, self.img_size))
+        image = TF.crop(image, i, j, h, w)
+        mask = TF.crop(mask, i, j, h, w)
+
+        # Random horizontal flipping
+        if np.random.random() > 0.5:
+            image = TF.hflip(image)
+            mask = TF.hflip(mask)
+
+        # Rotate
+        rotation = transforms.RandomRotation.get_params(degrees=[-30,30])
+        image = TF.rotate(image, rotation)
+        mask = TF.rotate(mask, rotation)
+
+        # Normalise
+        image = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(image)
+
+        return image, mask, text
+
+def remove_masked_area(images, masks):
+    """Removes those areas in the images that are covered by the corresponding masks"""
+    return images * (1 - masks)
