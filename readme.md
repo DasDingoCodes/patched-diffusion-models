@@ -8,7 +8,6 @@ Additionally, install the following with pip:
 # Todos
 
 - Update remote environment
-- Upload masked dataset to remote
 - Train on remote with more parameters
 - Text2Vec/Text2Tensor modules
 - Training with text
