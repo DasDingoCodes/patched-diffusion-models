@@ -15,4 +15,6 @@ dependencies:
   - tqdm
   - torchmetrics
   - scikit-image
+  - transformers
+  - sentence-transformers
 prefix: C:\Users\david\miniconda3\envs\my_pytorch
