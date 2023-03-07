@@ -303,12 +303,12 @@ def launch():
     args.batch_size = 16
     args.image_size = 128
     args.num_patches = 2
-    args.level_mult = [1,2,4]
+    args.level_mult = [1,2,2,4,4]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 32
+    args.hidden = 128
     args.dropout = 0.00
     args.use_self_attention = False
     args.prediction_type = "noise"
