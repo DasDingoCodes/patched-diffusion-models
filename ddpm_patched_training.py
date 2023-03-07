@@ -306,7 +306,7 @@ def launch():
     args.level_mult = [1,2,4]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
-    args.device_ids = [0,3]
+    args.device_ids = [2,3]
     args.lr = 3e-4
     args.hidden = 32
     args.dropout = 0.00
