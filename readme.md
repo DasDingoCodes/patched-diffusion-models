@@ -7,8 +7,6 @@ Additionally, install the following with pip:
 
 # Todos
 
-- Update remote environment
-- Train on remote with more parameters
-- Text2Vec/Text2Tensor modules
+- Make loading text embeddings faster. Maybe use [Numpy Memmap](https://numpy.org/doc/stable/reference/generated/numpy.memmap.html)?
 - Training with text
 - Sampling with different text (i.e. replace "blonde hair" with "black hair")
