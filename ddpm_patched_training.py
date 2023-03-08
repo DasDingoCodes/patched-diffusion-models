@@ -79,7 +79,7 @@ class Diffusion:
     def sample_timesteps(self, n):
         return torch.randint(low=1, high=self.noise_steps, size=(n,))
 
-    def sample(self, model, n, prediction_type, x=None, original_imgs=None):
+    def sample(self, model, n, prediction_type, x=None, conditional_images=None, conditional_text_embeddings=None):
         logging.info(f"Sampling {n} new images....")
         model.eval()
         with torch.no_grad():
@@ -94,17 +94,17 @@ class Diffusion:
                     noise = torch.randn_like(x)
                 else:
                     noise = torch.zeros_like(x)
+                prediction = model(x, t, conditional_image=conditional_images, conditional_text_embeddings=conditional_text_embeddings)
                 if prediction_type == "noise":
-                    predicted_noise = model(x, t, conditional_image=original_imgs)
-                    x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * predicted_noise) + torch.sqrt(beta) * noise
+                    x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * prediction) + torch.sqrt(beta) * noise
                 elif prediction_type == "image":
-                    x = 1 / torch.sqrt(alpha) * model(x, t, conditional_image=original_imgs) + torch.sqrt(beta) * noise
+                    x = 1 / torch.sqrt(alpha) * prediction + torch.sqrt(beta) * noise
 
         model.train()
-        if original_imgs != None:
+        if conditional_images != None:
             # if image retouching, then model predicts difference between original_imgs and wanted images
             # in that case, add original_imgs to the output of the model to get a prediction for the wanted image
-            x += original_imgs
+            x += conditional_images
         x = (x.clamp(-1, 1) + 1) / 2
         x = (x * 255).type(torch.uint8)
         return x
@@ -137,7 +137,9 @@ def train(args):
         level_mult = args.level_mult,
         use_self_attention=args.use_self_attention,
         use_conditional_image=use_conditional_image,
-        dropout=args.dropout
+        dropout=args.dropout,
+        use_conditional_text=args.use_conditional_text,
+        text_embedding_dim=384,
     )
     if torch.cuda.device_count() > 1:
         model= nn.DataParallel(model,device_ids = args.device_ids)
@@ -164,12 +166,14 @@ def train(args):
             sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
     else:
         train_dataloader, sample_dataloader = get_data_img_mask_text(args, sample_percentage=0.1)
-        sample_imgs_from_dataset, sample_masks_from_dataset, _ = next(iter(sample_dataloader))
+        sample_imgs_from_dataset, sample_masks_from_dataset, sample_embeddings_from_dataset = next(iter(sample_dataloader))
         while sample_imgs_from_dataset.shape[0] < num_sample_imgs:
-            imgs_next_batch, masks_next_batch, _ = next(iter(sample_dataloader))
+            imgs_next_batch, masks_next_batch, embeddings_next_batch = next(iter(sample_dataloader))
             sample_imgs_from_dataset = torch.concat((sample_imgs_from_dataset, imgs_next_batch))
             sample_masks_from_dataset = torch.concat((sample_masks_from_dataset, masks_next_batch))
+            sample_embeddings_from_dataset = torch.concat((sample_embeddings_from_dataset, embeddings_next_batch))
         sample_masks_from_dataset = sample_masks_from_dataset[:num_sample_imgs].to(device)
+        sample_embeddings_from_dataset = sample_embeddings_from_dataset[:num_sample_imgs].to(device)
     sample_imgs_from_dataset = sample_imgs_from_dataset[:num_sample_imgs].to(device)
 
     # Save sample images from dataset
@@ -222,23 +226,25 @@ def train(args):
             
             if image_retouching_type != "inpainting":
                 images, _ = next(iter(train_dataloader))
+                conditional_text_embedding = None
             else:
-                images, masks, texts = next(iter(train_dataloader))
+                images, masks, conditional_text_embedding = next(iter(train_dataloader))
                 masks = masks.to(device)
+                conditional_text_embedding = conditional_text_embedding.to(device)
             images = images.to(device)
             t = diffusion.sample_timesteps(images.shape[0]).to(device)
 
             if image_retouching_type == "super_resolution":
-                conditional, x_t, noise = diffusion.super_resolution_noise_data(images, t)
+                conditional_image, x_t, noise = diffusion.super_resolution_noise_data(images, t)
             elif image_retouching_type == "colourise":
-                conditional, x_t, noise = diffusion.colourise_noise_data(images, t)
+                conditional_image, x_t, noise = diffusion.colourise_noise_data(images, t)
             elif image_retouching_type == "inpainting":
-                conditional, x_t, noise = diffusion.inpainting_noise_data(images, t, masks)
+                conditional_image, x_t, noise = diffusion.inpainting_noise_data(images, t, masks)
             else:
                 x_t, noise, prev_x = diffusion.noise_images(images, t, prediction_type=prediction_type)
-                conditional = None
+                conditional_image = None
 
-            prediction = model(x_t, t, conditional_image=conditional)
+            prediction = model(x_t, t, conditional_image=conditional_image, conditional_text_embedding=conditional_text_embedding)
 
             if prediction_type == "noise":
                 loss = mse(noise, prediction)
@@ -257,7 +263,8 @@ def train(args):
             n=num_sample_imgs, 
             prediction_type=prediction_type, 
             x=noise_sample,
-            original_imgs=sample_input_imgs
+            conditional_images=sample_input_imgs,
+            conditional_text_embeddings=sample_embeddings_from_dataset,
         )
         save_images(sampled_images, os.path.join("results", args.run_name, f"{epoch}.jpg"))
         torch.save(model.state_dict(), os.path.join("models", args.run_name, f"ckpt.pt"))
@@ -301,18 +308,20 @@ def launch():
     args.steps_per_epoch = 1000
     args.noise_steps = 250
     args.batch_size = 16
-    args.image_size = 128
+    args.image_size = 64
     args.num_patches = 2
-    args.level_mult = [1,2,2,2,4]
+    args.level_mult = [1,2,2]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 256
+    args.hidden = 5
     args.dropout = 0.00
     args.use_self_attention = False
     args.prediction_type = "noise"
     args.image_retouching_type = "inpainting"
+    args.use_conditional_text = False
+    args.dataloader_num_workers = 0
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
 
     # super_resolution arguments
@@ -321,7 +330,7 @@ def launch():
     # inpainting arguments
     args.inpainting_image_dir = Path("data/CelebAMask-HQ/CelebA-HQ-img")
     args.inpainting_mask_dir = Path("data/CelebAMask-HQ/hair_masks")
-    args.inpainting_text_dir = Path("data/CelebAMask-HQ/labels")
+    args.inpainting_text_dir = Path("data/CelebAMask-HQ/descriptions_embedded")
     args.inpainting_texts_per_img = 10
     train(args)
 
