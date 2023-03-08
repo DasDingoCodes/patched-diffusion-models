@@ -106,7 +106,8 @@ class TextMaskDataset(Dataset):
         Args:
             image_dir: Path of directory containing image files. All images are .jpg files and are named only with an index
             mask_dir: Path of directory containing mask files. All masks are .png files and are named only with an index
-            text_dir: Path of directory containing text files. All texts are .txt files and are named only with an index. Each line of a text file contains a description of the corresponding image
+            text_dir: Path of directory containing embedded descriptions of the corresponding image. 
+                For each image there is a folder and in each folder there are texts_per_img tensor files with the embedded description sentences 
             texts_per_img: How many descriptions there are for each image, defaults to 10
             img_size: height and width which the images shall be scaled to, defaults to 128
         """
@@ -115,20 +116,6 @@ class TextMaskDataset(Dataset):
         self.path_text_dir = Path(text_dir)
         self.texts_per_img = texts_per_img
         self.img_size = img_size
-
-        self.descriptions = []
-        # self._init_descriptions()
-    
-    def _init_descriptions(self):
-        self.descriptions = []
-        total_file_count = self.__len__()
-        for i in range(total_file_count):
-            text_file = self.path_text_dir / f"{i}.txt"
-            img_descriptions = text_file.read_text().split("\n")
-            img_descriptions = [x.strip() for x in img_descriptions if x.strip()][:self.texts_per_img]
-            self.descriptions.append(img_descriptions)
-            print(f"Initialising descriptions... {i+1}/{total_file_count}", end="\r")
-        print("\nFinished initialising texts!")
 
     def __len__(self):
         return len([x for x in self.path_image_dir.iterdir()])
@@ -142,8 +129,8 @@ class TextMaskDataset(Dataset):
 
         image = io.imread(path_img)
         mask = io.imread(path_mask)
-        # text = self.descriptions[idx][np.random.randint(self.texts_per_img)]
-        text = ""
+        random_description_index = np.random.randint(self.texts_per_img)
+        embedded_description = self.path_text_dir / idx / f"{random_description_index}.pt"
 
         # transforms
         # To Tensor
@@ -174,7 +161,7 @@ class TextMaskDataset(Dataset):
         # Normalise
         image = transforms.Normalize((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(image)
 
-        return image, mask, text
+        return image, mask, embedded_description
 
 def remove_masked_area(images, masks):
     """Removes those areas in the images that are covered by the corresponding masks"""
