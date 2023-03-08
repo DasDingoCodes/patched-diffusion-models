@@ -130,7 +130,7 @@ class TextMaskDataset(Dataset):
         image = io.imread(path_img)
         mask = io.imread(path_mask)
         random_description_index = np.random.randint(self.texts_per_img)
-        path_embedded_description = self.path_text_dir / idx / f"{random_description_index}.pt"
+        path_embedded_description = self.path_text_dir / f"{idx}" / f"{random_description_index}.pt"
         embedded_description = torch.load(path_embedded_description)
 
         # transforms
