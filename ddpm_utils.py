@@ -35,8 +35,8 @@ def get_data(args, sample_percentage = 0.1):
     ])
     dataset = torchvision.datasets.ImageFolder(Path(args.dataset_path), transform=transforms)
     sample_dataset, train_dataset = random_split(dataset, (sample_percentage, 1.0 - sample_percentage))
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    sample_dataloader = DataLoader(sample_dataset, batch_size=args.batch_size, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.dataloader_num_workers)
+    sample_dataloader = DataLoader(sample_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.dataloader_num_workers)
     return train_dataloader, sample_dataloader
 
 def get_fid_init(args, batch_size=32, max_iter: int = None, feature: int = 64, normalize: bool = True):
@@ -94,8 +94,8 @@ def get_data_img_mask_text(args, sample_percentage):
         img_size=args.image_size
     )
     sample_dataset, train_dataset = random_split(dataset, (sample_percentage, 1.0 - sample_percentage))
-    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True)
-    sample_dataloader = DataLoader(sample_dataset, batch_size=args.batch_size, shuffle=True)
+    train_dataloader = DataLoader(train_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.dataloader_num_workers)
+    sample_dataloader = DataLoader(sample_dataset, batch_size=args.batch_size, shuffle=True, num_workers=args.dataloader_num_workers)
     return train_dataloader, sample_dataloader
 
 class TextMaskDataset(Dataset):
