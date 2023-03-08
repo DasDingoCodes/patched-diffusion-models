@@ -1,4 +1,4 @@
-
+import math
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -146,6 +146,42 @@ class ConditionalInjection(nn.Module):
         x = torch.concat((x, conditional), dim=1)
         return self.conv(x)
 
+class VectorToSquareMatrix(nn.Module):
+    def __init__(self, embedding_dim, target_dim, max_start_dim=16, hidden=64):
+        super().__init__()
+        scaling_steps = self._num_scaling_steps(max_start_dim, target_dim)
+        self.start_dim = target_dim // 2**scaling_steps
+        self.embedding_in = nn.Linear(embedding_dim, self.start_dim*self.start_dim)
+        upscaling_list = [
+            nn.ConvTranspose2d(
+                1,
+                hidden,
+                2,
+                stride=2,
+            )
+        ]
+        for i in range(scaling_steps - 1):
+            upscaling_list.append(
+                nn.ConvTranspose2d(
+                    hidden,
+                    hidden,
+                    2,
+                    stride=2,
+                )
+            )
+        self.upscaling = nn.Sequential(*upscaling_list)
+    
+    def _num_scaling_steps(self, dim_small, dim_big):
+        pow_2_dif = math.log2(dim_big) - math.log2(dim_small)
+        return math.ceil(pow_2_dif)
+
+    def forward(self, x: torch.Tensor):
+        x = self.embedding_in(x)
+        x = x.view(-1, self.start_dim, self.start_dim)
+        x = x.unsqueeze(1)
+        x = self.upscaling(x)
+        return x
+
 class UNetPatched(nn.Module):
     def __init__(
         self, 
@@ -160,6 +196,8 @@ class UNetPatched(nn.Module):
         use_self_attention=True,
         use_conditional_image=False,
         conditional_img_channels=3,
+        use_conditional_text=False,
+        text_embedding_dim=384,
         device="cuda",
         dropout=0.0
     ):
@@ -171,6 +209,8 @@ class UNetPatched(nn.Module):
         self.use_self_attention = use_self_attention
         self.use_conditional_image = use_conditional_image
         self.conditional_img_channels = conditional_img_channels
+        self.use_conditional_text = use_conditional_text
+        self.text_embedding_dim=text_embedding_dim
         self.dropout = dropout
 
         self.num_levels = len(self.level_mult) - 1
@@ -195,9 +235,23 @@ class UNetPatched(nn.Module):
 
         self.in_layer = DoubleConv(self.c_in, hidden * level_mult[0], dropout=dropout)
         if self.use_conditional_image:
-            self.in_layer_conditional = ConditionalInjection(
+            self.in_layer_conditional_img = ConditionalInjection(
                 hidden * level_mult[0],
                 self.conditional_img_channels,
+                hidden * level_mult[0],
+                self.num_patches, 
+                dropout=dropout
+            )
+        
+        if self.use_conditional_text:
+            self.embedding_reshaping = VectorToSquareMatrix(
+                self.text_embedding_dim,
+                self.img_size, # make text embedding matrix as big as input/output image
+                hidden=hidden
+            )
+            self.in_layer_conditional_text = ConditionalInjection(
+                hidden * level_mult[0],
+                hidden, # the text embeddings get reshaped to a matrix with channel size of hidden
                 hidden * level_mult[0],
                 self.num_patches, 
                 dropout=dropout
@@ -206,7 +260,8 @@ class UNetPatched(nn.Module):
         level = 0
         self.down_conv_layers = []
         self.down_att_layers = []
-        self.down_conditional_layers = []
+        self.down_conditional_img_layers = []
+        self.down_conditional_txt_layers = []
         for i in range(self.num_levels):
             level += 1
             hidden_in = hidden * level_mult[i]
@@ -222,13 +277,24 @@ class UNetPatched(nn.Module):
             # the conditional image has to be scaled down to the size of the x at that layer
             # the downscaling factor will be num_patches * 2^x with x being the "level" the layer is at within the UNet
             if self.use_conditional_image:
-                self.down_conditional_layers.append(
+                self.down_conditional_img_layers.append(
                     ConditionalInjection(
                         hidden_out,
                         self.conditional_img_channels,
                         hidden_out,
                         self.num_patches * 2**level, 
                         dropout=dropout
+                    )
+                )
+            if self.use_conditional_text:
+                self.down_conditional_txt_layers.append(
+                    ConditionalInjection(
+                        hidden_out,
+                        hidden,
+                        hidden_out,
+                        self.num_patches * 2**level, 
+                        dropout=dropout,
+                        pooling_operation="max"
                     )
                 )
             # self attention outputs shape (B, C, S, S) with C channels and S size
@@ -241,7 +307,8 @@ class UNetPatched(nn.Module):
                     SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level, dropout=dropout)
                 )
         self.down_conv_layers = nn.ModuleList(self.down_conv_layers)
-        self.down_conditional_layers = nn.ModuleList(self.down_conditional_layers)
+        self.down_conditional_img_layers = nn.ModuleList(self.down_conditional_img_layers)
+        self.down_conditional_txt_layers = nn.ModuleList(self.down_conditional_txt_layers)
         self.down_att_layers = nn.ModuleList(self.down_att_layers)
         
         self.middle_layers = []
@@ -258,7 +325,8 @@ class UNetPatched(nn.Module):
         reversed_level_mult = list(reversed(level_mult))
         self.up_conv_layers = []
         self.up_att_layers = []
-        self.up_conditional_layers = []
+        self.up_conditional_img_layers = []
+        self.up_conditional_txt_layers = []
         for i in range(self.num_levels):
             level -= 1
             # hidden in takes in the output of the previous layer 
@@ -271,7 +339,7 @@ class UNetPatched(nn.Module):
                 Up(hidden_in, hidden_out, dropout=dropout)
             )
             if self.use_conditional_image:
-                self.up_conditional_layers.append(
+                self.up_conditional_img_layers.append(
                     ConditionalInjection(
                         hidden_out,
                         self.conditional_img_channels,
@@ -280,17 +348,37 @@ class UNetPatched(nn.Module):
                         dropout=dropout
                     )
                 )
+            if self.use_conditional_text:
+                self.up_conditional_txt_layers.append(
+                    ConditionalInjection(
+                        hidden_out,
+                        hidden,
+                        hidden_out,
+                        self.num_patches * 2**level, 
+                        dropout=dropout,
+                        pooling_operation="max"
+                    )
+                )
             if self.use_self_attention:
                 self.up_att_layers.append(
                     SelfAttention(hidden_out, self.img_size // self.num_patches // 2**level, dropout=dropout)
                 )
         self.up_conv_layers = nn.ModuleList(self.up_conv_layers)
-        self.up_conditional_layers = nn.ModuleList(self.up_conditional_layers)
+        self.up_conditional_img_layers = nn.ModuleList(self.up_conditional_img_layers)
+        self.up_conditional_txt_layers = nn.ModuleList(self.up_conditional_txt_layers)
         self.up_att_layers = nn.ModuleList(self.up_att_layers)
         if self.use_conditional_image:
-            self.out_layer_conditional = ConditionalInjection(
+            self.out_layer_conditional_img = ConditionalInjection(
                 hidden * level_mult[0],
                 self.conditional_img_channels,
+                hidden * level_mult[0],
+                self.num_patches, 
+                dropout=dropout
+            )
+        if self.use_conditional_text:
+            self.out_layer_conditional_text = ConditionalInjection(
+                hidden * level_mult[0],
+                hidden,
                 hidden * level_mult[0],
                 self.num_patches, 
                 dropout=dropout
@@ -324,14 +412,17 @@ class UNetPatched(nn.Module):
         x = x.permute(0,2,1,3).reshape(B, H*p, W*p, C//(p*p))
         return x.permute(0, 3, 1, 2)
 
-    def forward(self, x, t, conditional_image=None):
+    def forward(self, x, t, conditional_image=None, conditional_text_embedding=None):
         t = t.unsqueeze(-1).type(torch.float)
         t = self.pos_encoding(t, self.time_dim)
 
         x = self.to_patches(x, patch_size=self.num_patches)
         x = self.in_layer(x)
-        if conditional_image != None:
-            x = self.in_layer_conditional(x, conditional_image)
+        if self.use_conditional_image and conditional_image != None:
+            x = self.in_layer_conditional_img(x, conditional_image)
+        if self.use_conditional_text and conditional_text_embedding != None:
+            conditional_text_embedding = self.embedding_reshaping(conditional_text_embedding)
+            x = self.in_layer_conditional_text(x, conditional_text_embedding)
 
         # Down
         x_down_list = []
@@ -339,9 +430,12 @@ class UNetPatched(nn.Module):
             x_down_list.append(x)
             conv = self.down_conv_layers[i]
             x = conv(x, t)
-            if conditional_image != None:
-                conditional = self.down_conditional_layers[i]
+            if  self.use_conditional_image and conditional_image != None:
+                conditional = self.down_conditional_img_layers[i]
                 x = conditional(x, conditional_image)
+            if  self.use_conditional_text and conditional_text_embedding != None:
+                conditional = self.down_conditional_txt_layers[i]
+                x = conditional(x, conditional_text_embedding)
             if self.use_self_attention:
                 att = self.down_att_layers[i]
                 x = att(x)
@@ -353,15 +447,20 @@ class UNetPatched(nn.Module):
             conv = self.up_conv_layers[i]
             x_skip = x_down_list[ self.num_levels-1 - i ]
             x = conv(x, x_skip, t)
-            if conditional_image != None:
-                conditional = self.up_conditional_layers[i]
+            if  self.use_conditional_image and conditional_image != None:
+                conditional = self.up_conditional_img_layers[i]
                 x = conditional(x, conditional_image)
+            if  self.use_conditional_text and conditional_text_embedding != None:
+                conditional = self.up_conditional_txt_layers[i]
+                x = conditional(x, conditional_text_embedding)
             if self.use_self_attention:
                 att = self.up_att_layers[i]
                 x = att(x)
 
-        if conditional_image != None:
-            x = self.out_layer_conditional(x, conditional_image)
+        if  self.use_conditional_image and conditional_image != None:
+            x = self.out_layer_conditional_img(x, conditional_image)
+        if  self.use_conditional_text and conditional_text_embedding != None:
+            x = self.out_layer_conditional_text(x, conditional_text_embedding)
         x = self.out_layer(x)
 
         output = self.from_patches(x, patch_size=self.num_patches)
