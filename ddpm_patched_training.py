@@ -79,7 +79,7 @@ class Diffusion:
     def sample_timesteps(self, n):
         return torch.randint(low=1, high=self.noise_steps, size=(n,))
 
-    def sample(self, model, n, prediction_type, x=None, conditional_images=None, conditional_text_embeddings=None):
+    def sample(self, model, n, prediction_type, x=None, conditional_images=None, conditional_text_embedding=None):
         logging.info(f"Sampling {n} new images....")
         model.eval()
         with torch.no_grad():
@@ -94,7 +94,7 @@ class Diffusion:
                     noise = torch.randn_like(x)
                 else:
                     noise = torch.zeros_like(x)
-                prediction = model(x, t, conditional_image=conditional_images, conditional_text_embeddings=conditional_text_embeddings)
+                prediction = model(x, t, conditional_image=conditional_images, conditional_text_embedding=conditional_text_embedding)
                 if prediction_type == "noise":
                     x = 1 / torch.sqrt(alpha) * (x - ((1 - alpha) / (torch.sqrt(1 - alpha_hat))) * prediction) + torch.sqrt(beta) * noise
                 elif prediction_type == "image":
@@ -264,7 +264,7 @@ def train(args):
             prediction_type=prediction_type, 
             x=noise_sample,
             conditional_images=sample_input_imgs,
-            conditional_text_embeddings=sample_embeddings_from_dataset,
+            conditional_text_embedding=sample_embeddings_from_dataset,
         )
         save_images(sampled_images, os.path.join("results", args.run_name, f"{epoch}.jpg"))
         torch.save(model.state_dict(), os.path.join("models", args.run_name, f"ckpt.pt"))
