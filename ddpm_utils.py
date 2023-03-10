@@ -87,10 +87,11 @@ def setup_logging(run_name):
 
 def get_data_img_mask_text(args, sample_percentage):
     dataset = TextMaskDataset(
-        image_dir=args.inpainting_image_dir,
-        mask_dir=args.inpainting_mask_dir,
-        text_dir=args.inpainting_text_dir,
+        path_image_dir=args.inpainting_image_dir,
+        path_mask_dir=args.inpainting_mask_dir,
+        path_text_dir=args.inpainting_text_dir,
         texts_per_img=args.inpainting_texts_per_img,
+        path_text_embeddings=args.path_text_embeddings,
         img_size=args.image_size
     )
     sample_dataset, train_dataset = random_split(dataset, (sample_percentage, 1.0 - sample_percentage))
@@ -101,19 +102,25 @@ def get_data_img_mask_text(args, sample_percentage):
 class TextMaskDataset(Dataset):
     """Images with masks and descriptions"""
 
-    def __init__(self, image_dir, mask_dir, text_dir, texts_per_img=10, img_size=128):
+    def __init__(self, path_image_dir, path_mask_dir, path_text_dir=None, path_text_embeddings=None, texts_per_img=10, img_size=128):
         """
         Args:
-            image_dir: Path of directory containing image files. All images are .jpg files and are named only with an index
-            mask_dir: Path of directory containing mask files. All masks are .png files and are named only with an index
-            text_dir: Path of directory containing embedded descriptions of the corresponding image. 
-                For each image there is a folder and in each folder there are texts_per_img tensor files with the embedded description sentences 
+            path_image_dir: Path of directory containing image files. All images are .jpg files and are named only with an index
+            path_mask_dir: Path of directory containing mask files. All masks are .png files and are named only with an index
+            path_text_dir: Path of directory containing embedded descriptions of the corresponding image. 
+                For each image there is a folder and in each folder there are texts_per_img tensor files with the embedded description sentences.
+                Will not be used if path_text_embeddings if given.
+                Defaults to None.
+            path_text_embeddings: Path of Pytorch tensor file with shape (num_images, texts_per_img, embedding_dimensions).
+                Will be used instead of path_text_dir if both are given.
+                Defaults to None.
             texts_per_img: How many descriptions there are for each image, defaults to 10
             img_size: height and width which the images shall be scaled to, defaults to 128
         """
-        self.path_image_dir = Path(image_dir)
-        self.path_mask_dir = Path(mask_dir)
-        self.path_text_dir = Path(text_dir)
+        self.path_image_dir = Path(path_image_dir)
+        self.path_mask_dir = Path(path_mask_dir)
+        self.path_text_dir = Path(path_text_dir)
+        self.text_embeddings = torch.load(Path(path_text_embeddings)) if path_text_embeddings else None
         self.texts_per_img = texts_per_img
         self.img_size = img_size
 
@@ -130,8 +137,11 @@ class TextMaskDataset(Dataset):
         image = io.imread(path_img)
         mask = io.imread(path_mask)
         random_description_index = np.random.randint(self.texts_per_img)
-        path_embedded_description = self.path_text_dir / f"{idx}" / f"{random_description_index}.pt"
-        embedded_description = torch.load(path_embedded_description)
+        if self.text_embeddings != None:
+            embedded_description = self.text_embeddings[idx][random_description_index]
+        else:
+            path_embedded_description = self.path_text_dir / f"{idx}" / f"{random_description_index}.pt"
+            embedded_description = torch.load(path_embedded_description)
 
         # transforms
         # To Tensor

@@ -331,6 +331,7 @@ def launch():
     args.inpainting_image_dir = Path("data/CelebAMask-HQ/CelebA-HQ-img")
     args.inpainting_mask_dir = Path("data/CelebAMask-HQ/hair_masks")
     args.inpainting_text_dir = Path("data/CelebAMask-HQ/descriptions_embedded")
+    args.path_text_embeddings = Path("data/CelebAMask-HQ/description_embeddings.pt")
     args.inpainting_texts_per_img = 10
     train(args)
 
