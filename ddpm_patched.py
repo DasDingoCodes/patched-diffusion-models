@@ -130,7 +130,7 @@ class Up(nn.Module):
 
 
 class ConditionalInjection(nn.Module):
-    def __init__(self, x_in_channels, conditional_in_channels, out_channels, downscaling_factor, dropout=0.0, pooling_operation="avg"):
+    def __init__(self, x_in_channels, conditional_in_channels, out_channels, downscaling_factor, dropout=0.0, pooling_operation="avg", residual=True):
         super().__init__()
 
         if pooling_operation == "avg":
@@ -139,7 +139,7 @@ class ConditionalInjection(nn.Module):
             self.downscaling = nn.MaxPool2d(downscaling_factor)
         else:
             self.downscaling = nn.AvgPool2d(downscaling_factor)
-        self.conv = DoubleConv(x_in_channels + conditional_in_channels, out_channels, dropout=dropout)
+        self.conv = DoubleConv(x_in_channels + conditional_in_channels, out_channels, dropout=dropout, residual=residual)
     
     def forward(self, x, conditional):
         conditional = self.downscaling(conditional)
