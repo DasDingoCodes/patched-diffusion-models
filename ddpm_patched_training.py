@@ -63,7 +63,7 @@ class Diffusion:
 
     def inpainting_noise_data(self, x, t, mask):
         """Returns x_masked (x with masked area removed), x_t (diffused difference between x and x_masked at timestep t) and Ɛ (noise inserted into x_t at timestep t)"""
-        x_masked = remove_masked_area(x, mask)
+        x_masked = remove_masked_area(x, mask, device=self.device)
         x_t, Ɛ, _ = self.noise_images(x - x_masked, t, prediction_type="noise")
         return x_masked, x_t, Ɛ
 
@@ -188,7 +188,7 @@ def train(args):
     elif image_retouching_type == "colourise":
         sample_input_imgs = diffusion.grayscale(sample_imgs_from_dataset)
     elif image_retouching_type == "inpainting":
-        sample_input_imgs = remove_masked_area(sample_imgs_from_dataset, sample_masks_from_dataset)
+        sample_input_imgs = remove_masked_area(sample_imgs_from_dataset, sample_masks_from_dataset, device=device)
     else:
         sample_input_imgs = None
     

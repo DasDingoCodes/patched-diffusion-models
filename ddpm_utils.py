@@ -164,6 +164,8 @@ class TextMaskDataset(Dataset):
 
         return image, mask, embedded_description
 
-def remove_masked_area(images, masks):
-    """Removes those areas in the images that are covered by the corresponding masks"""
-    return images * (1 - masks)
+def remove_masked_area(images: torch.Tensor, masks: torch.Tensor, mean=0.5, std=0.5, device="cpu"):
+    """Replaces areas in images covered by masks with noise."""
+    imgs_masks_removed = images * (1 - masks)
+    noisy_masks = masks * torch.normal(size=masks.size(), mean=mean, std=std).to(device)
+    return imgs_masks_removed + noisy_masks
