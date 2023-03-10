@@ -308,19 +308,19 @@ def launch():
     args.steps_per_epoch = 1000
     args.noise_steps = 250
     args.batch_size = 16
-    args.image_size = 64
+    args.image_size = 128
     args.num_patches = 2
-    args.level_mult = [1,2,2]
+    args.level_mult = [1,2,2,2,4]
     args.dataset_path = f"data/{dataset}"
     args.device = "cuda:2"
     args.device_ids = [2,3]
     args.lr = 3e-4
-    args.hidden = 5
-    args.dropout = 0.00
+    args.hidden = 128
+    args.dropout = 0.01
     args.use_self_attention = False
     args.prediction_type = "noise"
     args.image_retouching_type = "inpainting"
-    args.use_conditional_text = False
+    args.use_conditional_text = True
     args.dataloader_num_workers = 0
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
 
