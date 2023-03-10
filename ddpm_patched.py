@@ -132,19 +132,22 @@ class Up(nn.Module):
 class ConditionalInjection(nn.Module):
     def __init__(self, x_in_channels, conditional_in_channels, out_channels, downscaling_factor, dropout=0.0, pooling_operation="avg", residual=True):
         super().__init__()
-
+        self.residual = residual
         if pooling_operation == "avg":
             self.downscaling = nn.AvgPool2d(downscaling_factor)
         elif pooling_operation == "max":
             self.downscaling = nn.MaxPool2d(downscaling_factor)
         else:
             self.downscaling = nn.AvgPool2d(downscaling_factor)
-        self.conv = DoubleConv(x_in_channels + conditional_in_channels, out_channels, dropout=dropout, residual=residual)
+        self.conv = DoubleConv(x_in_channels + conditional_in_channels, out_channels, dropout=dropout)
     
     def forward(self, x, conditional):
         conditional = self.downscaling(conditional)
         x = torch.concat((x, conditional), dim=1)
-        return self.conv(x)
+        if self.residual:
+            return F.gelu(x + self.conv(x))
+        else:
+            return self.conv(x)
 
 class VectorToSquareMatrix(nn.Module):
     def __init__(self, embedding_dim, target_dim, max_start_dim=16, hidden=64):
