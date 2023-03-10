@@ -143,11 +143,11 @@ class ConditionalInjection(nn.Module):
     
     def forward(self, x, conditional):
         conditional = self.downscaling(conditional)
-        x = torch.concat((x, conditional), dim=1)
+        x_conditional = torch.concat((x, conditional), dim=1)
         if self.residual:
-            return F.gelu(x + self.conv(x))
+            return F.gelu(x + self.conv(x_conditional))
         else:
-            return self.conv(x)
+            return self.conv(x_conditional)
 
 class VectorToSquareMatrix(nn.Module):
     def __init__(self, embedding_dim, target_dim, max_start_dim=16, hidden=64):
