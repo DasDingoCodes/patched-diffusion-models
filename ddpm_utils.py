@@ -123,6 +123,20 @@ class TextMaskDataset(Dataset):
         self.text_embeddings = torch.load(Path(path_text_embeddings)) if path_text_embeddings else None
         self.texts_per_img = texts_per_img
         self.img_size = img_size
+        # I am checking whether the dataset is the default celeba because the default has a different structure than masked celeba.
+        # celeba images have leading 0s and start with 000001 instead of 000000.
+        # I don't want to change the dataset on the remote so I will just handle default celeba differently
+        self.default_celeba = "celeba" in self.path_image_dir.parts and "img_align_celeba" in self.path_image_dir.parts
+    
+    def _get_img_path(self, idx):
+        """Returns path to image file.
+        Do some ugly parsing specifically for default celeba
+        I could save all image paths in a list of self.path_image_dir.iterdir() and access it with idx.
+        But iterdir() does not guarantee ordered results and the list might take up quite some memory"""
+        if self.default_celeba:
+            return self.path_image_dir / f"{idx+1:06d}.jpg"
+        else:
+            return self.path_image_dir / f"{idx}.jpg"
 
     def __len__(self):
         return len([x for x in self.path_image_dir.iterdir()])
@@ -131,7 +145,7 @@ class TextMaskDataset(Dataset):
         if torch.is_tensor(idx):
             idx = idx.tolist()
         
-        path_img = self.path_image_dir / f"{idx}.jpg"
+        path_img = self._get_img_path(idx)
         image = io.imread(path_img)
         image = transforms.ToTensor()(image)
 
@@ -153,7 +167,6 @@ class TextMaskDataset(Dataset):
         else:
             embedded_description = torch.empty(1)
 
-        # transforms
         # Resize 
         resize = transforms.Resize(size=(self.img_size + 10, self.img_size + 10))
         image = resize(image)
