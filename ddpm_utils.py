@@ -102,7 +102,7 @@ def get_data_img_mask_text(args, sample_percentage):
 class TextMaskDataset(Dataset):
     """Images with masks and descriptions"""
 
-    def __init__(self, path_image_dir, path_mask_dir, path_text_dir=None, path_text_embeddings=None, texts_per_img=10, img_size=128):
+    def __init__(self, path_image_dir, path_mask_dir=None, path_text_dir=None, path_text_embeddings=None, texts_per_img=10, img_size=128):
         """
         Args:
             path_image_dir: Path of directory containing image files. All images are .jpg files and are named only with an index
@@ -118,8 +118,8 @@ class TextMaskDataset(Dataset):
             img_size: height and width which the images shall be scaled to, defaults to 128
         """
         self.path_image_dir = Path(path_image_dir)
-        self.path_mask_dir = Path(path_mask_dir)
-        self.path_text_dir = Path(path_text_dir)
+        self.path_mask_dir = Path(path_mask_dir) if path_mask_dir else None
+        self.path_text_dir = Path(path_text_dir) if path_text_dir else None
         self.text_embeddings = torch.load(Path(path_text_embeddings)) if path_text_embeddings else None
         self.texts_per_img = texts_per_img
         self.img_size = img_size
@@ -132,22 +132,28 @@ class TextMaskDataset(Dataset):
             idx = idx.tolist()
         
         path_img = self.path_image_dir / f"{idx}.jpg"
-        path_mask = self.path_mask_dir / f"{idx}.png"
-
         image = io.imread(path_img)
-        mask = io.imread(path_mask)
+        image = transforms.ToTensor()(image)
+
+        if self.path_mask_dir != None:
+            path_mask = self.path_mask_dir / f"{idx}.png"
+            mask = io.imread(path_mask)
+            mask = transforms.ToTensor()(mask)
+        else:
+            # Create random mask if no mask dir given
+            mask = torch.zeros_like(image)
+            mask = transforms.RandomErasing(p=0.9,value=1.0)(mask)
+
         random_description_index = np.random.randint(self.texts_per_img)
         if self.text_embeddings != None:
             embedded_description = self.text_embeddings[idx][random_description_index]
-        else:
+        elif self.path_text_dir != None:
             path_embedded_description = self.path_text_dir / f"{idx}" / f"{random_description_index}.pt"
             embedded_description = torch.load(path_embedded_description)
+        else:
+            embedded_description = torch.empty(1)
 
         # transforms
-        # To Tensor
-        image = transforms.ToTensor()(image)
-        mask = transforms.ToTensor()(mask)
-
         # Resize 
         resize = transforms.Resize(size=(self.img_size + 10, self.img_size + 10))
         image = resize(image)
