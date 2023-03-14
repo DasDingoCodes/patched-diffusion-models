@@ -320,7 +320,7 @@ def launch():
     args.use_self_attention = False
     args.prediction_type = "noise"
     args.image_retouching_type = "inpainting"
-    args.use_conditional_text = True
+    args.use_conditional_text = False
     args.dataloader_num_workers = 0
     args.run_name = f"{time_str}_DDPM_{args.num_patches}x{args.num_patches}_patches_{dataset}_{args.epochs}_epochs"
 
