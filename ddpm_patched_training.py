@@ -174,7 +174,10 @@ def train(args):
             sample_embeddings_from_dataset = torch.concat((sample_embeddings_from_dataset, embeddings_next_batch))
         sample_masks_from_dataset = sample_masks_from_dataset[:num_sample_imgs].to(device)
         sample_embeddings_from_dataset = sample_embeddings_from_dataset[:num_sample_imgs].to(device)
+        
     sample_imgs_from_dataset = sample_imgs_from_dataset[:num_sample_imgs].to(device)
+    if not args.use_conditional_text or args.path_text_embeddings == None:
+        sample_embeddings_from_dataset = None
 
     # Save sample images from dataset
     sample_imgs_from_dataset_int = NormalizeInverse((0.5, 0.5, 0.5), (0.5, 0.5, 0.5))(sample_imgs_from_dataset)
@@ -329,9 +332,9 @@ def launch():
     
     # inpainting arguments
     args.inpainting_image_dir = Path("data/CelebAMask-HQ/CelebA-HQ-img")
-    args.inpainting_mask_dir = Path("data/CelebAMask-HQ/hair_masks")
-    args.inpainting_text_dir = Path("data/CelebAMask-HQ/descriptions_embedded")
-    args.path_text_embeddings = Path("data/CelebAMask-HQ/description_embeddings.pt")
+    args.inpainting_mask_dir = None # Path("data/CelebAMask-HQ/hair_masks")
+    args.inpainting_text_dir = None # Path("data/CelebAMask-HQ/descriptions_embedded")
+    args.path_text_embeddings = None # Path("data/CelebAMask-HQ/description_embeddings.pt")
     args.inpainting_texts_per_img = 10
     train(args)
 
